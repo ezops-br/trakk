@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.production
+prod.env
+
+# Next.js build output
+.next/
+out/
+
+# TypeScript / backend build output
+dist/
+build/
+*.tsbuildinfo
+
+# Prisma local SQLite (if ever used for local testing)
+prisma/*.db
+prisma/*.db-journal
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local uploads (avatar storage)
+uploads/

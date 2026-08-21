@@ -1,0 +1,276 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════
+   DARK THEME (default)
+   Source: ACE Dev Visual Identity — Dark
+   ═══════════════════════════════════════════ */
+:root {
+  --trakk-teal:          #00C2B3;
+  --trakk-blue:          #0077B6;
+  --trakk-cyan:          #00E5FF;
+
+  --trakk-bg:            #091420;
+  --trakk-surface:       #0A1628;
+  --trakk-surface-alt:   #0F2040;
+  --trakk-border:        #1A3A5C;
+
+  --trakk-text:          #FFFFFF;
+  --trakk-text-secondary:#8AA3BC;
+  --trakk-text-strong:   #C4D6E7;
+  --trakk-text-dim:      #E8F4FD;
+
+  --trakk-gradient:      linear-gradient(135deg, #00C2B3 0%, #0077B6 100%);
+  --trakk-gradient-rev:  linear-gradient(135deg, #0077B6 0%, #00C2B3 100%);
+  --trakk-glow:          0 0 40px rgba(0, 194, 179, 0.30);
+  --trakk-glow-subtle:   0 0 20px rgba(0, 194, 179, 0.15);
+  --trakk-shadow:        0 4px 24px rgba(0, 0, 0, 0.40);
+
+  --trakk-teal-bg:       rgba(0, 194, 179, 0.10);
+  --trakk-teal-border:   rgba(0, 194, 179, 0.25);
+  --trakk-teal-hover:    rgba(0, 194, 179, 0.06);
+
+  --trakk-blue-bg:       rgba(0, 119, 182, 0.10);
+  --trakk-blue-border:   rgba(0, 119, 182, 0.25);
+
+  --trakk-neutral-bg:    rgba(255, 255, 255, 0.05);
+  --trakk-neutral-border:rgba(255, 255, 255, 0.10);
+
+  --trakk-urgent:        #FF4757;
+  --trakk-high:          #FF8C42;
+  --trakk-medium:        #FFC857;
+  --trakk-low:           #47B8E0;
+  --trakk-none:          #8AA3BC;
+  --trakk-success:       #2ED573;
+  --trakk-error:         #FF4757;
+  --trakk-warning:       #FFC857;
+
+  --trakk-overlay:       rgba(5, 13, 20, 0.80);
+
+  --font-display:        'Barlow Condensed', sans-serif;
+  --font-body:           'Barlow', sans-serif;
+  --font-mono:           'Space Mono', monospace;
+}
+
+/* ═══════════════════════════════════════════
+   LIGHT THEME
+   Source: ACE Dev Visual Identity — Light
+   ═══════════════════════════════════════════ */
+[data-theme="light"] {
+  --trakk-teal:          #009E91;
+  --trakk-blue:          #005F9E;
+  --trakk-cyan:          #00B8D4;
+
+  --trakk-bg:            #F0F5FA;
+  --trakk-surface:       #FFFFFF;
+  --trakk-surface-alt:   #E4EDF6;
+  --trakk-border:        #C6DCED;
+
+  --trakk-text:          #0A1C2E;
+  --trakk-text-secondary:#4A6880;
+  --trakk-text-strong:   #1E3A52;
+  --trakk-text-dim:      #003A5C;
+
+  --trakk-gradient:      linear-gradient(135deg, #009E91 0%, #005F9E 100%);
+  --trakk-gradient-rev:  linear-gradient(135deg, #005F9E 0%, #009E91 100%);
+  --trakk-glow:          0 4px 24px rgba(0, 94, 158, 0.12);
+  --trakk-glow-subtle:   0 2px 12px rgba(0, 94, 158, 0.08);
+  --trakk-shadow:        0 2px 12px rgba(0, 0, 0, 0.05);
+
+  --trakk-teal-bg:       rgba(0, 158, 145, 0.09);
+  --trakk-teal-border:   rgba(0, 158, 145, 0.25);
+  --trakk-teal-hover:    rgba(0, 158, 145, 0.05);
+
+  --trakk-blue-bg:       rgba(0, 95, 158, 0.09);
+  --trakk-blue-border:   rgba(0, 95, 158, 0.22);
+
+  --trakk-neutral-bg:    rgba(0, 0, 0, 0.04);
+  --trakk-neutral-border:rgba(0, 0, 0, 0.12);
+
+  --trakk-overlay:       rgba(0, 0, 0, 0.40);
+}
+
+/* ═══════════════════════════════════════════
+   BASE STYLES
+   ═══════════════════════════════════════════ */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--trakk-bg);
+    color: var(--trakk-text);
+  }
+
+  body {
+    font-family: var(--font-body), sans-serif;
+    background-color: var(--trakk-bg);
+    color: var(--trakk-text);
+    min-height: 100vh;
+  }
+
+  /* Focus ring using teal */
+  :focus-visible {
+    outline: 2px solid var(--trakk-teal);
+    outline-offset: 2px;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--trakk-bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--trakk-border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--trakk-teal);
+  }
+}
+
+/* ═══════════════════════════════════════════
+   THEME TRANSITION (§9 — Smooth theme switch)
+   ═══════════════════════════════════════════ */
+html {
+  transition:
+    background-color 300ms cubic-bezier(0.45, 0, 0.55, 1),
+    color 200ms cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+html * {
+  transition:
+    background-color 200ms cubic-bezier(0.45, 0, 0.55, 1),
+    border-color     200ms cubic-bezier(0.45, 0, 0.55, 1),
+    color            150ms cubic-bezier(0.45, 0, 0.55, 1),
+    box-shadow       200ms cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+html [data-no-theme-transition],
+html [data-no-theme-transition] * {
+  transition: none !important;
+}
+
+/* ═══════════════════════════════════════════
+   REDUCED MOTION
+   ═══════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  html,
+  html * {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   AUTH LAYOUT BACKGROUND UTILITIES
+   ═══════════════════════════════════════════ */
+
+/* Auth layout background — radial glow */
+.auth-bg-glow {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0, 194, 179, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 110%, rgba(0, 119, 182, 0.10) 0%, transparent 70%);
+}
+
+[data-theme="light"] .auth-bg-glow {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0, 95, 158, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 100% 110%, rgba(0, 158, 145, 0.10) 0%, transparent 70%);
+}
+
+/* Auth layout background — subtle 60px grid overlay */
+.auth-bg-grid {
+  background-image:
+    linear-gradient(rgba(0, 194, 179, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 194, 179, 0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+[data-theme="light"] .auth-bg-grid {
+  background-image:
+    linear-gradient(rgba(0, 95, 158, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 95, 158, 0.04) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Command palette / dialog overlay — stronger backdrop for focus */
+[data-radix-dialog-overlay] {
+  background-color: rgba(5, 13, 20, 0.80) !important;
+}
+
+[data-theme="light"] [data-radix-dialog-overlay] {
+  background-color: rgba(0, 0, 0, 0.40) !important;
+}
+
+/* =========================================================
+   GOOGLE SIGN-IN BUTTON — Google brand-compliant, theme-aware
+   ========================================================= */
+.google-sign-in-btn {
+  background-color: #131314;
+  color: #E3E3E3;
+  border-color: #8E918F;
+}
+
+[data-theme="light"] .google-sign-in-btn {
+  background-color: #FFFFFF;
+  color: #1F1F1F;
+  border-color: #747775;
+}
+
+.google-sign-in-btn:hover:not(:disabled) {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="light"] .google-sign-in-btn:hover:not(:disabled) {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* =========================================================
+   LOGIN PAGE — Card entrance animation
+   ========================================================= */
+@media (prefers-reduced-motion: no-preference) {
+  .login-card-enter {
+    animation: loginCardEnter 400ms cubic-bezier(0.45, 0, 0.55, 1) both;
+  }
+
+  @keyframes loginCardEnter {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* =========================================================
+   LOGIN PAGE — Error callout entrance animation
+   ========================================================= */
+@media (prefers-reduced-motion: no-preference) {
+  .error-callout-enter {
+    animation: errorCalloutEnter 300ms cubic-bezier(0.45, 0, 0.55, 1) both;
+  }
+
+  @keyframes errorCalloutEnter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

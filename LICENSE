@@ -1,0 +1,74 @@
+Business Source License 1.1
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+
+-----------------------------------------------------------------------------
+
+Parameters
+
+Licensor:             ezops-br
+Licensed Work:        Trakk
+Additional Use Grant: You may make non-production use of the Licensed Work,
+                      including using it as a demo, playground, or starting
+                      template, provided such use does not include offering
+                      the Licensed Work to third parties on a hosted or
+                      embedded basis in order to compete with the Licensor.
+Change Date:          Four years from the date the Licensed Work is published.
+Change License:       Apache License, Version 2.0
+
+-----------------------------------------------------------------------------
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+Effective on the Change Date, or the fourth anniversary of the first
+publicly available distribution of a specific version of the Licensed Work
+under this License, whichever comes first, the Licensor hereby grants you
+rights under the terms of the Change License, and the rights granted in the
+paragraph above terminate.
+
+If your use of the Licensed Work does not comply with the requirements
+currently in effect as described in this License, you must purchase a
+commercial license from the Licensor, its affiliated entities, or authorized
+resellers, or you must refrain from using the Licensed Work.
+
+All copies of the original and modified Licensed Work, and derivative works
+of the Licensed Work, are subject to this License. This License applies
+separately for each version of the Licensed Work released. You may not
+attempt to alter or tamper with the inherent rights which accompany each
+version of the Licensed Work.
+
+You must include a copy of this License in any copy of the Licensed Work, and
+show this license prominently on the first user-accessible page of the
+Licensed Work. You must include a copy of this License in any copy of the
+derived work, and show this license prominently on the first user-accessible
+page of the derived work.
+
+The Licensor is not liable for any direct, indirect, consequential,
+incidental, or special damages arising out of or relating to the use of the
+Licensed Work. The Licensor is not obligated to provide any support or
+maintenance for the Licensed Work, or any warranty of any kind, express or
+implied, with the Licensed Work, or to provide the rights granted herein to
+any third party.
+
+You may terminate this License at any time. However, you agree to indemnify
+and hold the Licensor, its affiliated entities, and its authorized resellers
+harmless against any damages and costs incurred as a result of your
+termination.
+
+If this License is terminated, you may not use the Licensed Work in any way
+that is not permitted by this License. The Licensor reserves all rights not
+expressly granted to you.
+
+-----------------------------------------------------------------------------
+
+Notice
+
+The Business Source License (this document, or the "License") is not an Open
+Source license. However, the Licensed Work will eventually be made available
+under an Open Source License, as stated in this License.

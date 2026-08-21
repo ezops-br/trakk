@@ -1,0 +1,232 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  MEMBER
+  VIEWER
+}
+
+enum Priority {
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+  NONE
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  googleId    String?  @unique @map("google_id")
+  displayName String   @map("display_name")
+  avatarUrl         String?  @map("avatar_url")
+  themePreference   String   @default("light") @map("theme_preference")
+  avatarStoragePath String?  @map("avatar_storage_path")
+  googleAvatarUrl   String?  @map("google_avatar_url")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  memberships       ProjectMember[]
+  assignedTickets   Ticket[]        @relation("TicketAssignee")
+  reportedTickets   Ticket[]        @relation("TicketReporter")
+  comments          Comment[]
+  activityLogs      ActivityLog[]
+  organizedMeetings Meeting[]
+  oauthAccounts     OAuthAccount[]
+
+  @@map("users")
+}
+
+model OAuthAccount {
+  id              String  @id @default(uuid())
+  userId          String  @map("user_id")
+  provider        String
+  providerId      String  @map("provider_id")
+  accessTokenEnc  String  @map("access_token_enc")
+  refreshTokenEnc String? @map("refresh_token_enc")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@unique([provider, providerId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  key         String   @unique
+  description String?
+  archivedAt  DateTime? @map("archived_at")
+  // Monotonic per-project ticket number allocator. Never decremented, so a hard
+  // deleted ticket's number is never reused.
+  nextTicketNumber Int  @default(1) @map("next_ticket_number")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members ProjectMember[]
+  columns StatusColumn[]
+  tickets Ticket[]
+  labels  Label[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  projectId String   @map("project_id")
+  role      Role
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  user    User    @relation(fields: [userId], references: [id])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+model StatusColumn {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@map("status_columns")
+}
+
+model Ticket {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  // Auto-incremented per project in the service layer; unique enforced below
+  number         Int
+  title          String
+  description    String?
+  statusColumnId String   @map("status_column_id")
+  priority       Priority @default(NONE)
+  assigneeId     String?  @map("assignee_id")
+  reporterId     String   @map("reporter_id")
+  // Float supports fractional values for gap-based drag-and-drop reordering
+  sortOrder      Float    @map("sort_order")
+  // Null = active; non-null timestamp = archived (soft hide, restorable).
+  archivedAt     DateTime? @map("archived_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  statusColumn StatusColumn @relation(fields: [statusColumnId], references: [id], onDelete: Cascade)
+  assignee     User?        @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  reporter     User         @relation("TicketReporter", fields: [reporterId], references: [id])
+  labels       TicketLabel[]
+  comments     Comment[]
+  activityLogs ActivityLog[]
+  meetings     Meeting[]
+
+  @@unique([projectId, number])
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([statusColumnId])
+  @@index([projectId, statusColumnId])
+  @@index([projectId, archivedAt])
+  @@map("tickets")
+}
+
+model Label {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  color     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tickets TicketLabel[]
+
+  @@map("labels")
+}
+
+model TicketLabel {
+  ticketId String @map("ticket_id")
+  labelId  String @map("label_id")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  label  Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, labelId])
+  @@map("ticket_labels")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  ticketId  String   @map("ticket_id")
+  authorId  String   @map("author_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId])
+  @@map("comments")
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  ticketId  String   @map("ticket_id")
+  userId    String   @map("user_id")
+  action    String
+  oldValue  String?  @map("old_value")
+  newValue  String?  @map("new_value")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt(sort: Desc)])
+  @@map("activity_logs")
+}
+
+model Meeting {
+  id            String   @id @default(uuid())
+  ticketId      String   @map("ticket_id")
+  organizerId   String   @map("organizer_id")
+  googleEventId String   @map("google_event_id")
+  meetLink      String   @map("meet_link")
+  title         String
+  startTime     DateTime @map("start_time")
+  endTime       DateTime @map("end_time")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  organizer User   @relation(fields: [organizerId], references: [id])
+
+  @@index([ticketId])
+  @@index([ticketId, startTime(sort: Asc)])
+  @@index([organizerId, startTime(sort: Asc)])
+  @@unique([googleEventId])
+  @@map("meetings")
+}
