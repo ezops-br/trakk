@@ -16,7 +16,7 @@ export interface UseTicketDetailReturn {
   updateTicket: (input: UpdateTicketInput) => Promise<void>;
   addLabel: (labelId: string) => Promise<void>;
   removeLabel: (labelId: string) => Promise<void>;
-  deleteTicketPermanently: () => Promise<void>;
+  deleteTicket: () => Promise<void>;
   refetch: () => Promise<void>;
 }
 
@@ -89,12 +89,11 @@ export function useTicketDetail(
     [projectId, ticketNumber],
   );
 
-  // Hard delete — removes the ticket and everything attached to it. Rejections
-  // propagate so the caller can surface the error in its own UI.
-  const deleteTicketPermanently = useCallback(async (): Promise<void> => {
-    await apiClient.del(
+  const deleteTicket = useCallback(async (): Promise<void> => {
+    await apiClient.del<void>(
       `/api/v1/projects/${projectId}/tickets/${ticketNumber}`,
     );
+    setTicket(null);
   }, [projectId, ticketNumber]);
 
   return {
@@ -104,7 +103,7 @@ export function useTicketDetail(
     updateTicket,
     addLabel,
     removeLabel,
-    deleteTicketPermanently,
+    deleteTicket,
     refetch: fetchTicket,
   };
 }

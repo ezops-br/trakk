@@ -1,16 +1,13 @@
 // TDD Red Phase — new auth endpoints do not exist yet.
-// Tests for DELETE /api/v1/auth/me (CSRF mitigation) and
-// POST /api/v1/auth/google/disconnect.
+// Tests for DELETE /api/v1/auth/me (CSRF mitigation).
 
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { errorHandler } from '../middleware/error-handler';
-import { AppError } from '../lib/app-error';
 
 // Mock all service dependencies before importing the router
 jest.mock('../services/auth.service');
-jest.mock('../services/google-oauth.service');
 jest.mock('../utils/jwt');
 
 import { authRouter } from './auth.routes';
@@ -18,10 +15,6 @@ import * as authService from '../services/auth.service';
 import * as jwtUtils from '../utils/jwt';
 
 const mockDisconnectUser = authService.disconnectUser as jest.MockedFunction<typeof authService.disconnectUser>;
-const mockSoftDisconnectGoogle = authService.softDisconnectGoogle as jest.MockedFunction<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any
->;
 const mockVerifyToken = jwtUtils.verifyToken as jest.MockedFunction<typeof jwtUtils.verifyToken>;
 
 const FAKE_TOKEN_PAYLOAD = { userId: 'user-uuid-1', email: 'alice@example.com' };
@@ -48,9 +41,6 @@ describe('DELETE /api/v1/auth/me', () => {
     jest.clearAllMocks();
     mockVerifyToken.mockReturnValue(FAKE_TOKEN_PAYLOAD);
     mockDisconnectUser.mockResolvedValue(undefined);
-    if (mockSoftDisconnectGoogle) {
-      mockSoftDisconnectGoogle.mockResolvedValue(undefined);
-    }
   });
 
   it('returns 415 when Content-Type header is absent', async () => {
@@ -114,48 +104,6 @@ describe('DELETE /api/v1/auth/me', () => {
       .delete('/api/v1/auth/me')
       .set('Content-Type', 'application/json')
       .send('{}');
-
-    // Assert
-    expect(res.status).toBe(401);
-  });
-});
-
-describe('POST /api/v1/auth/google/disconnect', () => {
-  const app = buildAuthenticatedApp();
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockVerifyToken.mockReturnValue(FAKE_TOKEN_PAYLOAD);
-    if (mockSoftDisconnectGoogle) {
-      mockSoftDisconnectGoogle.mockResolvedValue(undefined);
-    }
-  });
-
-  it('returns 200 and calls softDisconnectGoogle for an authenticated user', async () => {
-    // Act
-    const res = await request(app)
-      .post('/api/v1/auth/google/disconnect')
-      .set('Cookie', `trakk_session=${VALID_SESSION}`)
-      .send({});
-
-    // Assert
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ message: 'Google account disconnected' });
-    if (mockSoftDisconnectGoogle) {
-      expect(mockSoftDisconnectGoogle).toHaveBeenCalledWith(FAKE_TOKEN_PAYLOAD.userId);
-    }
-  });
-
-  it('returns 401 when unauthenticated (no session cookie)', async () => {
-    // Arrange
-    mockVerifyToken.mockImplementation(() => {
-      throw new Error('No token');
-    });
-
-    // Act
-    const res = await request(app)
-      .post('/api/v1/auth/google/disconnect')
-      .send({});
 
     // Assert
     expect(res.status).toBe(401);

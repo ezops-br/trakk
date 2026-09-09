@@ -18,7 +18,6 @@ export interface UseTicketsReturn {
   error: string | null;
   createTicket: (input: CreateTicketInput) => Promise<TicketWithRelations>;
   deleteTicket: (ticketNumber: number) => Promise<void>;
-  archiveTicket: (ticketNumber: number) => Promise<void>;
   reorderTickets: (updates: ReorderUpdate[]) => Promise<void>;
   setTickets: React.Dispatch<React.SetStateAction<TicketWithRelations[]>>;
   refetch: () => Promise<void>;
@@ -42,6 +41,11 @@ function buildQuery(filters?: TicketFilters): string {
   if (filters.assigneeId) params.set('assigneeId', filters.assigneeId);
   if (filters.labelId) params.set('labelId', filters.labelId);
   if (filters.q) params.set('q', filters.q);
+  if (filters.sort) params.set('sort', filters.sort);
+  if (filters.order) params.set('order', filters.order);
+  if (filters.dueDateFilter) params.set('dueDateFilter', filters.dueDateFilter);
+  if (filters.dueDateFrom) params.set('dueDateFrom', filters.dueDateFrom);
+  if (filters.dueDateTo) params.set('dueDateTo', filters.dueDateTo);
   const qs = params.toString();
   return qs ? `?${qs}` : '';
 }
@@ -112,20 +116,6 @@ export function useTickets(
     [projectId],
   );
 
-  // Soft delete: the ticket stays in the database with archivedAt set, but it
-  // is removed from the board just like a hard delete would remove it.
-  const archiveTicket = useCallback(
-    async (ticketNumber: number): Promise<void> => {
-      await apiClient.patch<{ ticket: TicketWithRelations }>(
-        `/api/v1/projects/${projectId}/tickets/${ticketNumber}/archive`,
-        { archive: true },
-      );
-      setTickets((prev) => prev.filter((t) => t.number !== ticketNumber));
-      setTotal((prev) => Math.max(0, prev - 1));
-    },
-    [projectId],
-  );
-
   const reorderTickets = useCallback(
     async (updates: ReorderUpdate[]): Promise<void> => {
       const updateMap = new Map(updates.map((u) => [u.ticketId, u]));
@@ -168,7 +158,6 @@ export function useTickets(
     error,
     createTicket,
     deleteTicket,
-    archiveTicket,
     reorderTickets,
     setTickets,
     refetch: fetchTickets,

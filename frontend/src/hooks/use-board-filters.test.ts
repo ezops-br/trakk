@@ -195,4 +195,109 @@ describe('useBoardFilters', () => {
     expect(calledUrl).toContain('search=login+bug');
     expect(mockReplace.mock.calls[0][1]).toEqual({ scroll: false });
   });
+
+  // --- Due date filter ---------------------------------------------------
+
+  it('setDueDateFilter("overdue") sets the enum and clears any custom range', () => {
+    // Arrange — start with a stale custom range in the URL
+    mockUseSearchParams.mockReturnValue(makeSearchParams({
+      dueDateFrom: '2026-07-20',
+      dueDateTo: '2026-07-25',
+    }));
+
+    // Act
+    const { result } = renderHook(() => useBoardFilters());
+    act(() => {
+      result.current.setDueDateFilter('overdue');
+      // Simulate what Next.js router does in production: update the URL
+      // that useSearchParams exposes on the next render.
+      mockUseSearchParams.mockReturnValue(makeSearchParams({ dueDateFilter: 'overdue' }));
+    });
+    // Re-read after the URL changed so the hook's useMemos re-parse.
+    const { result: result2 } = renderHook(() => useBoardFilters());
+
+    // Assert
+    expect(result2.current.filters.dueDateFilter).toBe('overdue');
+    expect(result2.current.filters.dueDateFrom).toBeUndefined();
+    expect(result2.current.filters.dueDateTo).toBeUndefined();
+    expect(result2.current.hasActiveFilters).toBe(true);
+
+    const calledUrl = mockReplace.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('dueDateFilter=overdue');
+    expect(calledUrl).not.toContain('dueDateFrom');
+    expect(calledUrl).not.toContain('dueDateTo');
+  });
+
+  it('setDueDateFilter(undefined, from, to) sets a custom range and clears the enum', () => {
+    // Arrange — start with a stale enum in the URL
+    mockUseSearchParams.mockReturnValue(makeSearchParams({
+      dueDateFilter: 'overdue',
+    }));
+
+    // Act
+    const { result } = renderHook(() => useBoardFilters());
+    act(() => {
+      result.current.setDueDateFilter(undefined, '2026-07-20', '2026-07-25');
+      // Simulate router-replace triggering re-read of the URL.
+      mockUseSearchParams.mockReturnValue(makeSearchParams({
+        dueDateFrom: '2026-07-20',
+        dueDateTo: '2026-07-25',
+      }));
+    });
+    const { result: result2 } = renderHook(() => useBoardFilters());
+
+    // Assert
+    expect(result2.current.filters.dueDateFilter).toBeUndefined();
+    expect(result2.current.filters.dueDateFrom).toBe('2026-07-20');
+    expect(result2.current.filters.dueDateTo).toBe('2026-07-25');
+    expect(result2.current.hasActiveFilters).toBe(true);
+
+    const calledUrl = mockReplace.mock.calls[0][0] as string;
+    expect(calledUrl).not.toContain('dueDateFilter');
+    expect(calledUrl).toContain('dueDateFrom=2026-07-20');
+    expect(calledUrl).toContain('dueDateTo=2026-07-25');
+  });
+
+  it('setDueDateFilter() with no args clears all three fields', () => {
+    // Arrange — all three fields populated in the URL
+    mockUseSearchParams.mockReturnValue(makeSearchParams({
+      dueDateFilter: 'overdue',
+      dueDateFrom: '2026-07-20',
+      dueDateTo: '2026-07-25',
+    }));
+
+    // Act
+    const { result } = renderHook(() => useBoardFilters());
+    act(() => {
+      result.current.setDueDateFilter();
+      // Simulate router-replace triggering re-read of the URL.
+      mockUseSearchParams.mockReturnValue(makeSearchParams());
+    });
+    const { result: result2 } = renderHook(() => useBoardFilters());
+
+    // Assert
+    expect(result2.current.filters.dueDateFilter).toBeUndefined();
+    expect(result2.current.filters.dueDateFrom).toBeUndefined();
+    expect(result2.current.filters.dueDateTo).toBeUndefined();
+    expect(result2.current.hasActiveFilters).toBe(false);
+
+    const calledUrl = mockReplace.mock.calls[0][0] as string;
+    expect(calledUrl).not.toContain('dueDateFilter');
+    expect(calledUrl).not.toContain('dueDateFrom');
+    expect(calledUrl).not.toContain('dueDateTo');
+  });
+
+  it('round-trips ?dueDateFilter=overdue from the URL into filters', () => {
+    // Arrange
+    mockUseSearchParams.mockReturnValue(makeSearchParams({
+      dueDateFilter: 'overdue',
+    }));
+
+    // Act
+    const { result } = renderHook(() => useBoardFilters());
+
+    // Assert
+    expect(result.current.filters.dueDateFilter).toBe('overdue');
+    expect(result.current.hasActiveFilters).toBe(true);
+  });
 });

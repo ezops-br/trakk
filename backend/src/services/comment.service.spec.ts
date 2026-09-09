@@ -484,35 +484,3 @@ describe('deleteComment', () => {
     expect(mockPrisma.comment.delete).not.toHaveBeenCalled();
   });
 });
-
-// ─── archived ticket guard ────────────────────────────────────────────────────
-
-describe('archived ticket guard', () => {
-  const MOCK_ARCHIVED_TICKET = {
-    ...MOCK_TICKET,
-    archivedAt: new Date('2026-08-01T10:00:00.000Z'),
-  };
-
-  it('blocks comment mutations on an archived ticket with 403', async () => {
-    // Arrange — active project, member role, but the ticket itself is archived.
-    (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER_MEMBERSHIP);
-    (mockPrisma.project.findUnique as jest.Mock).mockResolvedValue(MOCK_ACTIVE_PROJECT);
-    (mockPrisma.ticket.findFirst as jest.Mock).mockResolvedValue(MOCK_ARCHIVED_TICKET);
-    (mockPrisma.comment.findUnique as jest.Mock).mockResolvedValue(MOCK_COMMENT);
-
-    // Act & Assert — comment.service.ts uses forbidden() (403) for archive guards,
-    // deliberately different from ticket.service.ts's badRequest() (400).
-    await expect(
-      createComment(USER_ID, PROJECT_ID, TICKET_NUMBER, 'new comment'),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    await expect(
-      updateComment(USER_ID, PROJECT_ID, TICKET_NUMBER, COMMENT_ID, 'edited'),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    await expect(
-      deleteComment(USER_ID, PROJECT_ID, TICKET_NUMBER, COMMENT_ID),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    expect(mockPrisma.comment.create).not.toHaveBeenCalled();
-    expect(mockPrisma.comment.update).not.toHaveBeenCalled();
-    expect(mockPrisma.comment.delete).not.toHaveBeenCalled();
-  });
-});

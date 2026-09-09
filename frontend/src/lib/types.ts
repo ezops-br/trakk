@@ -1,6 +1,35 @@
 export type Role = "OWNER" | "MEMBER" | "VIEWER";
 export type Priority = "URGENT" | "HIGH" | "MEDIUM" | "LOW" | "NONE";
 
+export interface TicketTemplate {
+  id: string;
+  projectId: string;
+  name: string;
+  titleTemplate?: string | null;
+  descriptionTemplate?: string | null;
+  defaultPriority?: Priority | null;
+  defaultLabels: { id: string; name: string; color: string }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTicketTemplateInput {
+  name: string;
+  titleTemplate?: string;
+  descriptionTemplate?: string;
+  defaultPriority?: Priority;
+  defaultLabelIds?: string[];
+}
+
+export type UpdateTicketTemplateInput = Partial<CreateTicketTemplateInput>;
+export type LinkType = "BLOCKS" | "RELATES_TO" | "DUPLICATES";
+export type DisplayLinkType =
+  | "Blocks"
+  | "Is blocked by"
+  | "Relates to"
+  | "Duplicates"
+  | "Is duplicated by";
+
 export interface User {
   id: string;
   googleId?: string | null;
@@ -10,10 +39,7 @@ export interface User {
   themePreference: string;
   createdAt: string;
   updatedAt: string;
-  googleConnected?: boolean;
-  googleEmail?: string | null;
   avatarStoragePath?: string | null;
-  googleAvatarUrl?: string | null;
 }
 
 export interface OAuthAccount {
@@ -29,6 +55,7 @@ export interface Project {
   name: string;
   key: string;
   description: string | null;
+  dueDate?: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -43,12 +70,14 @@ export interface CreateProjectInput {
   name: string;
   key: string;
   description?: string | null;
+  dueDate?: string | null;
 }
 
 export interface UpdateProjectInput {
   name?: string;
   key?: string;
   description?: string | null;
+  dueDate?: string | null;
 }
 
 export interface ProjectMember {
@@ -91,12 +120,10 @@ export interface Ticket {
   statusColumnId: string;
   priority: Priority;
   assigneeId: string | null;
+  dueDate: string | null;
   reporterId: string;
   sortOrder: number;
-  // Soft-delete marker: null (or absent on older fixtures) = active,
-  // a timestamp = archived. Optional so existing test fixtures that predate
-  // the field still typecheck.
-  archivedAt?: string | null;
+  blockedBy: boolean;
   createdAt: string;
   updatedAt: string;
   assignee?: UserSummary | null;
@@ -154,48 +181,24 @@ export interface ActivityLog {
   user?: User;
 }
 
-export interface Meeting {
+export interface TicketLinkSummary {
   id: string;
-  ticketId: string;
-  organizerId: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  googleEventId: string;
-  meetLink: string;
+  sourceTicketId: string;
+  targetTicketId: string;
+  type: LinkType;
+  direction: 'outgoing' | 'incoming';
   createdAt: string;
-  updatedAt: string;
-  organizer?: User;
+  createdById: string;
 }
 
-export interface MeetingWithOrganizer {
-  id: string;
-  ticketId: string;
-  organizerId: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  meetLink: string;
-  createdAt: string;
-  updatedAt: string;
-  organizer: {
-    id: string;
-    displayName: string;
-    avatarUrl: string | null;
-  };
-}
-
-export interface ScheduleMeetingInput {
-  title: string;
-  startTime: string;
-  endTime: string;
-  attendeeEmails?: string[];
-}
-
-export interface UpdateMeetingInput {
-  title?: string;
-  startTime?: string;
-  endTime?: string;
+export interface LinkWithTicket extends TicketLinkSummary {
+  targetNumber: number;
+  targetTitle: string;
+  targetProjectId: string;
+  targetProjectKey: string;
+  targetPriority: Priority;
+  targetStatusColumnName: string;
+  displayType: DisplayLinkType;
 }
 
 export interface UserSummary {
@@ -239,6 +242,7 @@ export interface CreateTicketInput {
   statusColumnId: string;
   priority?: Priority;
   assigneeId?: string | null;
+  dueDate?: string | null;
 }
 
 export interface UpdateTicketInput {
@@ -247,7 +251,10 @@ export interface UpdateTicketInput {
   statusColumnId?: string;
   priority?: Priority;
   assigneeId?: string | null;
+  dueDate?: string | null;
 }
+
+export type DueDateFilter = 'overdue' | 'today' | 'this_week' | 'this_month';
 
 export interface TicketFilters {
   page?: number;
@@ -257,6 +264,11 @@ export interface TicketFilters {
   assigneeId?: string;
   labelId?: string;
   q?: string;
+  sort?: 'sortOrder' | 'priority' | 'dueDate' | 'createdAt' | 'updatedAt' | 'number' | 'assignee';
+  order?: 'asc' | 'desc';
+  dueDateFilter?: DueDateFilter;
+  dueDateFrom?: string;
+  dueDateTo?: string;
 }
 
 export interface ReorderUpdate {
@@ -270,6 +282,7 @@ export type BoardEventType =
   | "ticket.updated"
   | "ticket.deleted"
   | "ticket.reordered"
+  | "ticket.overdue"
   | "column.created"
   | "column.updated"
   | "column.deleted"
@@ -281,9 +294,8 @@ export type BoardEventType =
   | "comment.created"
   | "comment.updated"
   | "comment.deleted"
-  | "meeting.created"
-  | "meeting.updated"
-  | "meeting.deleted";
+  | "link.created"
+  | "link.deleted";
 
 export interface BoardEvent {
   type: BoardEventType;
@@ -303,6 +315,30 @@ export interface PaginatedResponse<T> {
   pageSize: number;
 }
 
+export type BulkOperation =
+  | 'status'
+  | 'priority'
+  | 'assignee'
+  | 'addLabel'
+  | 'removeLabel'
+  | 'delete';
+
+export interface BulkUpdatePayload {
+  ticketNumbers: number[];
+  operation: BulkOperation;
+  value?: string;
+}
+
+export interface BulkUpdateResult {
+  updated: number;
+  tickets: TicketWithRelations[];
+}
+
+export interface BulkDeleteResult {
+  deleted: number;
+  ticketNumbers: number[];
+}
+
 export const UNASSIGNED_SENTINEL = 'UNASSIGNED';
 
 export interface BoardFilters {
@@ -310,26 +346,9 @@ export interface BoardFilters {
   priorities: Priority[];  // empty = no filter
   labelIds: string[];      // empty = no filter
   search: string;          // empty string = no filter
-}
-
-export interface CalendarEvent {
-  id: string;
-  summary: string | null;
-  description: string | null;
-  start: string;
-  end: string;
-  meetLink: string | null;
-  htmlLink: string;
-  isTrakkEvent: boolean;
-  trakkTicketId: string | null;
-  trakkProjectId?: string | null;
-}
-
-export interface CalendarResponse {
-  events: CalendarEvent[];
-  calendarConnected: boolean;
-  needsReauth?: boolean;
-  error?: string;
+  dueDateFilter?: DueDateFilter; // convenience enum: overdue / today / this_week / this_month
+  dueDateFrom?: string;    // ISO date (YYYY-MM-DD); partial range allowed
+  dueDateTo?: string;      // ISO date (YYYY-MM-DD); partial range allowed
 }
 
 // ─── Dashboard API Types ──────────────────────────────────────────────────────
@@ -341,6 +360,7 @@ export interface RawDashboardTicket {
   title: string;
   priority: Priority;
   assigneeId: string | null;
+  dueDate: string | null;
   updatedAt: string;
   statusColumn: { name: string };
   project: { key: string; name: string };
@@ -366,23 +386,10 @@ export interface RawDashboardProject {
   updatedAt: string;
 }
 
-export interface RawDashboardMeeting {
-  id: string;
-  ticketId: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  meetLink: string;
-  organizerId: string;
-  organizer: { displayName: string; avatarUrl: string | null };
-  ticket: { number: number; projectId: string; project: { key: string } };
-}
-
 export interface RawDashboardResponse {
   tickets: RawDashboardTicket[];
   activities: RawDashboardActivity[];
   projects: RawDashboardProject[];
-  meetings: RawDashboardMeeting[];
 }
 
 // ─── Search API Types ──────────────────────────────────────────────────────

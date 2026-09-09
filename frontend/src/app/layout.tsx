@@ -32,8 +32,7 @@ const spaceMono = localFont({
 
 export const metadata: Metadata = {
   title: "Trakk",
-  description:
-    "Lightweight issue tracking with Kanban boards and Google Workspace integration.",
+  description: "Lightweight issue tracking with Kanban boards.",
 };
 
 export default function RootLayout({

@@ -1,36 +1,36 @@
 # Trakk
 
-Lightweight, self-hostable issue tracking with a Kanban board and native **Google Calendar + Google Meet** integration. Built for small-to-mid teams who want Linear-like speed without the SaaS lock-in.
+Lightweight, self-hostable issue tracking with a Kanban board. Built for small-to-mid teams who want Linear-like speed without the SaaS lock-in.
 
-Sign in with Google, create a project, drag tickets, schedule a meeting: done. No configuration wizards, no plugin marketplace, no vendor lock-in.
+Log in, create a project, drag tickets: done. No configuration wizards, no plugin marketplace, no vendor lock-in.
 
 ## Features
 
 - **Kanban board**: drag tickets between status columns, drag to delete, filter by assignee / priority / label
-- **Tickets**: Markdown descriptions, priorities, labels, assignees, auto-numbered per project (`TRAKK-42`)
+- **Tickets**: Markdown descriptions, priorities, labels, assignees, due dates, auto-numbered per project (`TRAKK-42`)
+- **Ticket templates**: reusable templates per project to speed up ticket creation
+- **Ticket links**: relate tickets to each other (blocks / relates to / duplicates)
+- **Attachments**: upload files directly on a ticket, stored in Postgres
 - **Comments & activity**: threaded comments with @mention autocomplete and a full audit trail on every ticket
 - **Project settings**: custom status columns, labels, and member management with Owner / Member / Viewer roles
-- **Google Calendar sidebar**: today's events on the dashboard with date navigation and a per-date cache
-- **Meetings on tickets**: schedule a Google Meet directly on a ticket; it lands on everyone's calendar
-- **Quick Meet**: one-click instant Meet link attached to a ticket
-- **Durable meeting reminders**: a pg-boss job queue posts a reminder comment 15 minutes before every meeting, surviving server restarts
-- **Personal dashboard**: assigned tickets, recent activity, upcoming meetings across all projects
+- **Search**: global search across tickets and projects
+- **Personal dashboard**: assigned tickets and recent activity across all projects
 - **Command palette**: `Cmd+K` / `Ctrl+K` global search and quick actions
 - **Real-time updates**: SSE-based live board and dashboard updates, no polling
-- **User profiles**: avatar upload, display name, theme preference (light/dark), Google disconnect
-- **S3-compatible avatar storage**: local disk in dev, any S3-compatible bucket in production
-- **Self-hosted**: one Docker Compose file runs the entire stack, including an nginx reverse proxy
+- **User profiles**: avatar upload, display name, theme preference (light/dark)
+- **Avatar storage**: local disk by default, or any S3-compatible bucket
+- **Auth**: email/password sessions (JWT in an HTTP-only cookie). No self-serve sign-up — users are provisioned via the seed script
+- **Self-hosted**: one Docker Compose file runs the entire stack
 
 ## Screenshots
 
 <table>
   <tr>
     <td width="50%"><img src="screenshots/chrome_QgiXXCwJi9.png" alt="Trakk interface" width="100%" /></td>
-    <td width="50%"><img src="screenshots/chrome_xpt1vhVxxk.png" alt="Trakk interface" width="100%" /></td>
+    <td width="50%"><img src="screenshots/chrome_AzXv1uaKwy.png" alt="Trakk interface" width="100%" /></td>
   </tr>
   <tr>
-    <td width="50%"><img src="screenshots/chrome_AzXv1uaKwy.png" alt="Trakk interface" width="100%" /></td>
-    <td width="50%"><img src="screenshots/chrome_3srJuKW4L3.png" alt="Trakk interface" width="100%" /></td>
+    <td width="50%" colspan="2"><img src="screenshots/chrome_3srJuKW4L3.png" alt="Trakk interface" width="100%" /></td>
   </tr>
 </table>
 
@@ -41,8 +41,7 @@ Sign in with Google, create a project, drag tickets, schedule a meeting: done. N
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, @dnd-kit |
 | Backend | Node.js, Express, TypeScript, Prisma ORM |
 | Database | PostgreSQL 16 |
-| Auth | Google OAuth 2.0, JWT in HTTP-only cookie |
-| Job queue | pg-boss (runs inside PostgreSQL, no separate queue service) |
+| Auth | Email/password, JWT in HTTP-only cookie |
 | Containers | Docker, Docker Compose |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 
@@ -55,32 +54,24 @@ Browser
   │     Server components  →  INTERNAL_API_URL (Docker-internal)
   │     Client components  →  NEXT_PUBLIC_API_URL (browser fetch)
   │
-  └── Express API (port 4000)
+  └── Express API (port 80 → container port 4000)
         ├── PostgreSQL 16 via Prisma ORM
-        ├── Google Calendar API  (credentials never leave the backend)
-        └── pg-boss job queue   (runs inside PostgreSQL)
-
-Traffic in production flows through nginx on port 80 → /api/* to the backend, everything else to the frontend.
+        └── SSE for real-time board and dashboard updates
 ```
+
+No reverse proxy in front of the stack: the backend is published directly on host port 80 and the frontend on port 3000. This mirrors how the ephemeral sandbox exposes the same `docker-compose.yml` (see `sandbox-setup.sh`).
 
 **Key design decisions**
 
-- Google API credentials are server-side only; the frontend has no direct access
-- JWT sessions in HTTP-only cookies, independent of the Google token lifecycle
-- Google refresh tokens are encrypted at rest (AES-256-GCM via `TOKEN_ENCRYPTION_KEY`)
+- JWT sessions in HTTP-only cookies; no self-serve registration, users come from `prisma/seed.ts`
 - Roles are project-scoped (Owner / Member / Viewer); no global admin
 - Every route derives the caller's role from the database, never from the request body
 - SSE for real-time board and dashboard updates without WebSockets or polling
-- Meeting reminders are durable pg-boss jobs, rehydrated on every server start
+- Ticket attachments are stored as bytes in Postgres, not on disk or S3
 
 ## Quick Start
 
-Requirements:
-
-- **Docker** and **Docker Compose** (v2)
-- A **Google Cloud project** with the Calendar API enabled and OAuth 2.0 credentials
-
-No local Node.js, npm, or PostgreSQL needed; everything runs inside Docker.
+Requirements: **Docker** and **Docker Compose** (v2). No local Node.js, npm, or PostgreSQL needed — everything runs inside Docker.
 
 ### 1. Clone and configure
 
@@ -90,126 +81,107 @@ cd trakk
 cp .env.example .env
 ```
 
-Open `.env` and fill in the required values:
+Fill in `.env`:
 
 | Variable | How to get it |
 |---|---|
 | `POSTGRES_PASSWORD` | Any strong random password |
-| `GOOGLE_CLIENT_ID` | Google Cloud Console → APIs & Services → Credentials |
-| `GOOGLE_CLIENT_SECRET` | Same credentials page |
-| `JWT_SECRET` | Any random string: `openssl rand -hex 32` |
-| `TOKEN_ENCRYPTION_KEY` | A 32-byte hex string (64 hex chars): `openssl rand -hex 32` |
-| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Same value as `GOOGLE_CLIENT_ID` |
+| `JWT_SECRET` | 64-char random string: `openssl rand -hex 32` |
 
-Everything else has a working default for local development.
+Everything else in `.env.example` has a working default for local development.
 
-### 2. Google Cloud Console setup
+### 2. Run it
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create a project.
-2. Enable the **Google Calendar API** (APIs & Services → Library → search "Google Calendar API").
-3. Configure the **OAuth consent screen** (External, add your email as a test user).
-4. Create **OAuth 2.0 credentials** (Credentials → Create → OAuth client ID → Web application).
-5. Add this **Authorized redirect URI**:
-   ```
-   http://localhost:4000/api/v1/auth/google/callback
-   ```
-6. Copy the Client ID and Client Secret into `.env`.
+The `local-setup.sh` script is the recommended way to run the stack locally — it wraps `docker compose` and also rotates `JWT_SECRET`, wipes and rebuilds the stack, waits for both services to be healthy, and seeds the database (there is no login-able user otherwise):
 
-### 3. Start
+```bash
+./local-setup.sh
+```
+
+Equivalent manual steps, if you'd rather not use the script:
 
 ```bash
 docker compose up -d --build
+docker compose exec -T backend npx prisma db seed
 ```
 
-The stack starts five services in dependency order:
+### 3. Access it
 
-1. **db**: PostgreSQL 16 with a named volume
-2. **migrate**: runs `prisma migrate deploy` once, exits 0
-3. **backend**: Express API (waits for migrations to complete)
-4. **frontend**: Next.js standalone build (waits for the backend health check)
-5. **nginx**: reverse proxy on port 80; routes `/api/` to the backend and everything else to the frontend
+| | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost/api/v1 |
 
-Open **http://localhost** (nginx), or bypass nginx at **http://localhost:3000** (frontend) and **http://localhost:4000/api/v1** (backend).
+Log in with the seeded admin account:
 
-First boot takes ~30 seconds while Docker builds images and runs migrations. Subsequent starts are instant.
+```
+email:    admin@trakk.local
+password: admin123
+```
+
+First boot takes ~30 seconds while Docker builds images and runs migrations. Subsequent runs of `local-setup.sh` wipe the database volume (`docker compose down -v`) and reseed it, so any data you created is lost on every re-run — that's by design, for a clean local dev loop.
+
+## Running in a sandbox
+
+`sandbox-setup.sh` brings up the same `docker-compose.yml` inside an ephemeral Daytona sandbox instead of your own machine. Differences from `local-setup.sh`:
+
+- It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. `.env.sandbox` has non-secret config baked in plus placeholders (`__FRONTEND_URL__`, `__BACKEND_URL__`, `__COOKIE_DOMAIN__`, `__JWT_SECRET__`) that the script fills in at runtime, since every sandbox gets a different hostname/UUID.
+- It starts the Docker daemon itself (a fresh sandbox doesn't have it running).
+- It pre-pulls the base images with retries, since the sandbox's outbound network proxy intermittently 502s on Docker Hub.
+- URLs follow the pattern `https://<port>-<sandbox-uuid>.<domain>` (default domain `sandbox.acedev.ai`, override with the `SANDBOX_DOMAIN` env var).
+
+Run it:
+
+```bash
+./sandbox-setup.sh
+```
+
+It prints the computed frontend/backend URLs when done. Log in with the same seeded account as local (`admin@trakk.local` / `admin123`).
+
+The rendered `.env` is gitignored and regenerated on every run — to change a non-secret config value, edit `.env.sandbox` (the committed template) instead, not `.env`.
 
 ## Environment Variables
 
-`.env.example` documents every variable. Key ones explained:
+`.env.example` documents every variable read by `docker-compose.yml`. The backend validates its own subset at boot (`backend/src/config.ts`):
 
 ### Required
 
 ```bash
-# Database
-POSTGRES_USER=trakk
-POSTGRES_PASSWORD=<strong-random-password>
-POSTGRES_DB=trakk
 DATABASE_URL=postgresql://trakk:${POSTGRES_PASSWORD}@db:5432/trakk
-
-# Google OAuth: from Google Cloud Console
-GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:4000/api/v1/auth/google/callback
-
-# Security (generate with: openssl rand -hex 32)
-JWT_SECRET=...              # signs JWT session tokens
-TOKEN_ENCRYPTION_KEY=...    # encrypts Google refresh tokens at rest (must be 64 hex chars)
+JWT_SECRET=...   # at least 32 characters — openssl rand -hex 32
 ```
 
-### Optional (have sensible defaults)
+### Optional (sensible defaults)
 
 ```bash
-JWT_EXPIRY=7d               # session lifetime
+JWT_EXPIRY=7d
 PORT=4000
 CORS_ORIGIN=http://localhost:3000
 NODE_ENV=development
+DISABLE_APP_CORS=      # sandbox-only, see config.ts comment
+SESSION_COOKIE_DOMAIN= # widen the session cookie's Domain attribute; sandbox-only
 
 # Frontend
-NEXT_PUBLIC_API_URL=http://localhost:4000       # bare origin, no /api/v1 suffix
-INTERNAL_API_URL=http://backend:4000/api/v1    # used by Next.js server components over Docker network
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=                   # same value as GOOGLE_CLIENT_ID
+NEXT_PUBLIC_API_URL=http://localhost   # bare origin, no /api/v1 suffix
+INTERNAL_API_URL=http://backend:4000/api/v1
 
-# S3-compatible avatar storage (leave blank to use local disk)
+# Avatar storage — leave blank to use local disk
 S3_BUCKET=
 S3_REGION=us-east-1
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
-S3_PUBLIC_URL=              # e.g. https://your-bucket.s3.amazonaws.com
+S3_PUBLIC_URL=
+AVATAR_UPLOAD_DIR=      # local disk path, defaults to ./uploads/avatars
 ```
+
+`SMTP_*` and `UPLOAD_STORAGE_PATH` / `UPLOAD_MAX_SIZE_MB` are also accepted by `config.ts` but are not wired to any feature yet.
 
 ## Avatar Storage
 
-By default avatars are stored on local disk inside the Docker volume. This works fine for a single-instance deploy but is not suitable for multi-server setups or ephemeral containers (files are lost on volume deletion).
+The backend auto-selects storage based on `S3_BUCKET`:
 
-### Local disk (default)
-
-No configuration needed. Avatars are written to `uploads/avatars/` and served by the backend at `/api/v1/uploads/avatars/<filename>`. Leave all `S3_*` variables blank.
-
-### S3-compatible storage
-
-Set the following variables in `.env`:
-
-```bash
-S3_BUCKET=your-bucket-name
-S3_REGION=us-east-1
-S3_ACCESS_KEY_ID=AKIA...
-S3_SECRET_ACCESS_KEY=...
-S3_PUBLIC_URL=https://your-bucket.s3.amazonaws.com
-```
-
-The backend auto-selects S3 when `S3_BUCKET` is set. Avatar URLs stored in the database will point to `S3_PUBLIC_URL/avatars/<filename>`. Make sure the bucket is publicly readable or fronted by a CDN.
-
-Works with any S3-compatible provider (AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces). For providers with a custom endpoint, set `S3_PUBLIC_URL` to your CDN or custom domain.
-
-**IAM permissions required** (AWS example):
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["s3:PutObject", "s3:DeleteObject"],
-  "Resource": "arn:aws:s3:::your-bucket-name/avatars/*"
-}
-```
+- **Blank (default)**: avatars are written to local disk (`AVATAR_UPLOAD_DIR`, default `./uploads/avatars`) and served at `/api/v1/uploads/avatars/<filename>`. Fine for a single-instance deploy; not suitable for multi-server setups since files live in the container volume.
+- **Set**: avatars go to the S3-compatible bucket named by `S3_BUCKET`. Works with AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces — set `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_PUBLIC_URL` (your bucket's or CDN's public base URL). The bucket must be publicly readable or fronted by a CDN.
 
 ## Development
 
@@ -279,9 +251,10 @@ trakk/
 ├── backend/
 │   ├── prisma/
 │   │   ├── schema.prisma          # Database schema (source of truth)
+│   │   ├── seed.ts                # Seeds the admin user + demo data
 │   │   └── migrations/            # Migration history (never hand-edit)
 │   └── src/
-│       ├── lib/                   # Prisma client, job queue, avatar storage, SSE broadcasters
+│       ├── lib/                   # Prisma client, avatar storage, SSE broadcasters
 │       ├── middleware/            # JWT auth, rate limiting, Zod validation
 │       ├── routes/                # Express routers + request schemas
 │       └── services/              # Business logic (one file per domain)
@@ -291,11 +264,11 @@ trakk/
 │       ├── components/            # React components
 │       ├── hooks/                 # Data-fetching and mutation hooks
 │       └── lib/                   # API client, shared types, utilities
-├── nginx/
-│   └── nginx.conf                 # Reverse proxy (SSE-aware), routes /api/ to backend
-├── infra/                         # Infrastructure / deployment assets
-├── docker-compose.yml             # Full stack: db + migrate + backend + frontend + nginx
-└── .env.example                   # Template for environment variables
+├── docker-compose.yml             # Full stack: db + migrate + backend + frontend
+├── local-setup.sh                 # Recommended way to run the stack locally
+├── sandbox-setup.sh               # Runs the stack inside an ephemeral Daytona sandbox
+├── .env.example                   # Template for a local .env
+└── .env.sandbox                   # Committed template rendered into .env by sandbox-setup.sh
 ```
 
 ## Contributing

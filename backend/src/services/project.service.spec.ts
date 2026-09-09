@@ -24,29 +24,12 @@ jest.mock('../lib/prisma', () => {
     statusColumn: {
       createMany: jest.fn(),
     },
-    meeting: {
-      findMany: jest.fn(),
-    },
-    oAuthAccount: {
-      findFirst: jest.fn(),
-    },
   };
   db.$transaction.mockImplementation(async (cb) => cb(db));
   return { prisma: db };
 });
 
-jest.mock('./google-calendar.service', () => ({
-  deleteCalendarEvent: jest.fn(),
-}), { virtual: true });
-
-jest.mock('./google-oauth.service', () => ({
-  getRefreshedAccessToken: jest.fn(),
-  revokeToken: jest.fn(),
-}));
-
 import { prisma } from '../lib/prisma';
-import { deleteCalendarEvent } from './google-calendar.service';
-import { getRefreshedAccessToken } from './google-oauth.service';
 import {
   listProjectsByUser,
   getProjectById,
@@ -58,8 +41,6 @@ import {
 import { AppError } from '../lib/app-error';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
-const mockDeleteCalendarEvent = deleteCalendarEvent as jest.MockedFunction<typeof deleteCalendarEvent>;
-const mockGetRefreshedAccessToken = getRefreshedAccessToken as jest.MockedFunction<typeof getRefreshedAccessToken>;
 
 const USER_ID = 'user-uuid-1';
 const PROJECT_ID = 'proj-uuid-1';
@@ -159,10 +140,10 @@ describe('getProjectById', () => {
 // ─── createProject ─────────────────────────────────────────────────────────
 
 describe('createProject', () => {
-  it('creates project, adds OWNER membership, creates 4 default status columns; returns project with role OWNER', async () => {
+  it('creates project, adds OWNER membership, creates 5 default status columns; returns project with role OWNER', async () => {
     (mockPrisma.project.create as jest.Mock).mockResolvedValue(MOCK_PROJECT);
     (mockPrisma.projectMember.create as jest.Mock).mockResolvedValue(MOCK_MEMBER);
-    (mockPrisma.statusColumn.createMany as jest.Mock).mockResolvedValue({ count: 4 });
+    (mockPrisma.statusColumn.createMany as jest.Mock).mockResolvedValue({ count: 5 });
 
     const result = await createProject(
       { name: 'Trakk', key: 'TRAKK', description: null },
@@ -175,7 +156,14 @@ describe('createProject', () => {
     );
     expect(mockPrisma.statusColumn.createMany).toHaveBeenCalledTimes(1);
     const createManyCall = (mockPrisma.statusColumn.createMany as jest.Mock).mock.calls[0][0];
-    expect(createManyCall.data).toHaveLength(4);
+    expect(createManyCall.data).toHaveLength(5);
+    expect(createManyCall.data.map((c: { name: string }) => c.name)).toEqual([
+      'backlog',
+      'todo',
+      'in_progress',
+      'review',
+      'done',
+    ]);
     expect(result).toMatchObject({ id: PROJECT_ID, role: 'OWNER' });
   });
 
@@ -189,6 +177,40 @@ describe('createProject', () => {
     await expect(
       createProject({ name: 'Trakk', key: 'TRAKK', description: null }, USER_ID),
     ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('persists dueDate when provided', async () => {
+    (mockPrisma.project.create as jest.Mock).mockResolvedValue({
+      ...MOCK_PROJECT,
+      dueDate: new Date('2026-12-31T00:00:00Z'),
+    });
+    (mockPrisma.projectMember.create as jest.Mock).mockResolvedValue(MOCK_MEMBER);
+    (mockPrisma.statusColumn.createMany as jest.Mock).mockResolvedValue({ count: 5 });
+
+    const dueDate = new Date('2026-12-31T00:00:00Z');
+    await createProject(
+      { name: 'Trakk', key: 'TRAKK', description: null, dueDate },
+      USER_ID,
+    );
+
+    expect(mockPrisma.project.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ dueDate }) }),
+    );
+  });
+
+  it("defaults dueDate to null when omitted", async () => {
+    (mockPrisma.project.create as jest.Mock).mockResolvedValue(MOCK_PROJECT);
+    (mockPrisma.projectMember.create as jest.Mock).mockResolvedValue(MOCK_MEMBER);
+    (mockPrisma.statusColumn.createMany as jest.Mock).mockResolvedValue({ count: 5 });
+
+    await createProject(
+      { name: 'Trakk', key: 'TRAKK', description: null },
+      USER_ID,
+    );
+
+    expect(mockPrisma.project.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ dueDate: null }) }),
+    );
   });
 });
 
@@ -229,44 +251,65 @@ describe('updateProject', () => {
       updateProject(PROJECT_ID, USER_ID, { key: 'TAKEN' }),
     ).rejects.toMatchObject({ statusCode: 409 });
   });
+
+  it('updates dueDate when provided', async () => {
+    (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER);
+    const dueDate = new Date('2026-12-31T00:00:00Z');
+    (mockPrisma.project.update as jest.Mock).mockResolvedValue({
+      ...MOCK_PROJECT,
+      dueDate,
+    });
+
+    await updateProject(PROJECT_ID, USER_ID, { dueDate });
+
+    expect(mockPrisma.project.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: PROJECT_ID },
+        data: expect.objectContaining({ dueDate }),
+      }),
+    );
+  });
+
+  it('clears dueDate when explicitly set to null', async () => {
+    (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER);
+    (mockPrisma.project.update as jest.Mock).mockResolvedValue({
+      ...MOCK_PROJECT,
+      dueDate: null,
+    });
+
+    await updateProject(PROJECT_ID, USER_ID, { dueDate: null });
+
+    expect(mockPrisma.project.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: PROJECT_ID },
+        data: expect.objectContaining({ dueDate: null }),
+      }),
+    );
+  });
+
+  it('leaves dueDate untouched when the key is absent', async () => {
+    (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER);
+    (mockPrisma.project.update as jest.Mock).mockResolvedValue({
+      ...MOCK_PROJECT,
+      name: 'Renamed Only',
+    });
+
+    await updateProject(PROJECT_ID, USER_ID, { name: 'Renamed Only' });
+
+    const updateCall = (mockPrisma.project.update as jest.Mock).mock.calls[0][0];
+    expect(updateCall.data).not.toHaveProperty('dueDate');
+  });
 });
 
 // ─── deleteProject ─────────────────────────────────────────────────────────
 
 describe('deleteProject', () => {
-  it('deletes project for OWNER; skips Calendar cleanup for meetings with null googleEventId', async () => {
+  it('deletes project for OWNER', async () => {
     (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER);
-    // One meeting with null googleEventId — no calendar call expected
-    (mockPrisma.meeting.findMany as jest.Mock).mockResolvedValue([
-      { id: 'meeting-1', googleEventId: null, organizer: { id: USER_ID } },
-    ]);
     (mockPrisma.project.delete as jest.Mock).mockResolvedValue(MOCK_PROJECT);
 
     await deleteProject(PROJECT_ID, USER_ID);
 
-    expect(mockPrisma.project.delete).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: PROJECT_ID } }),
-    );
-    expect(mockDeleteCalendarEvent).not.toHaveBeenCalled();
-  });
-
-  it('calls deleteCalendarEvent for meetings with a valid googleEventId and valid token', async () => {
-    (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(MOCK_MEMBER);
-    (mockPrisma.meeting.findMany as jest.Mock).mockResolvedValue([
-      { id: 'meeting-1', googleEventId: 'gcal-event-1', organizerId: USER_ID },
-    ]);
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      id: 'oauth-1',
-      refreshTokenEnc: 'encrypted-refresh-token',
-    });
-    (mockGetRefreshedAccessToken as jest.Mock).mockResolvedValue('fresh-access-token');
-    mockDeleteCalendarEvent.mockResolvedValue(undefined);
-    (mockPrisma.project.delete as jest.Mock).mockResolvedValue(MOCK_PROJECT);
-
-    await deleteProject(PROJECT_ID, USER_ID);
-
-    expect(mockGetRefreshedAccessToken).toHaveBeenCalledWith('encrypted-refresh-token');
-    expect(mockDeleteCalendarEvent).toHaveBeenCalledWith('fresh-access-token', 'gcal-event-1');
     expect(mockPrisma.project.delete).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: PROJECT_ID } }),
     );

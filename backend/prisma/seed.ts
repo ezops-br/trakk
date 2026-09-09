@@ -1,4 +1,5 @@
 import { PrismaClient, Priority, Role } from '@prisma/client';
+import { hashPassword } from '../src/utils/password';
 
 const prisma = new PrismaClient();
 
@@ -6,29 +7,18 @@ async function main() {
   console.log('Seeding database...');
 
   // ── Users ──────────────────────────────────────────────────────────────
-  const alice = await prisma.user.upsert({
-    where: { email: 'alice@test.com' },
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@trakk.local' },
     update: {},
     create: {
-      email: 'alice@test.com',
-      googleId: 'google-alice-test-123',
-      displayName: 'Alice Chen',
-      avatarUrl: 'https://api.dicebear.com/8.x/initials/svg?seed=Alice',
+      email: 'admin@trakk.local',
+      passwordHash: await hashPassword('admin123'),
+      displayName: 'Admin',
+      avatarUrl: 'https://api.dicebear.com/8.x/initials/svg?seed=Admin',
     },
   });
 
-  const bob = await prisma.user.upsert({
-    where: { email: 'bob@test.com' },
-    update: {},
-    create: {
-      email: 'bob@test.com',
-      googleId: 'google-bob-test-456',
-      displayName: 'Bob Martinez',
-      avatarUrl: 'https://api.dicebear.com/8.x/initials/svg?seed=Bob',
-    },
-  });
-
-  console.log(`Created users: ${alice.email}, ${bob.email}`);
+  console.log(`Created user: ${admin.email}`);
 
   // ── Project ────────────────────────────────────────────────────────────
   const project = await prisma.project.upsert({
@@ -45,15 +35,9 @@ async function main() {
 
   // ── Members ────────────────────────────────────────────────────────────
   await prisma.projectMember.upsert({
-    where: { userId_projectId: { userId: alice.id, projectId: project.id } },
+    where: { userId_projectId: { userId: admin.id, projectId: project.id } },
     update: {},
-    create: { userId: alice.id, projectId: project.id, role: Role.OWNER },
-  });
-
-  await prisma.projectMember.upsert({
-    where: { userId_projectId: { userId: bob.id, projectId: project.id } },
-    update: {},
-    create: { userId: bob.id, projectId: project.id, role: Role.MEMBER },
+    create: { userId: admin.id, projectId: project.id, role: Role.OWNER },
   });
 
   console.log('Added project members');
@@ -94,12 +78,12 @@ async function main() {
       data: {
         projectId: project.id,
         number: 1,
-        title: 'Set up Google OAuth authentication',
-        description: 'Implement Google OAuth 2.0 sign-in flow with JWT session management.',
+        title: 'Set up email/password authentication',
+        description: 'Implement email/password sign-in with JWT session management.',
         statusColumnId: colToDo.id,
         priority: Priority.HIGH,
-        assigneeId: alice.id,
-        reporterId: alice.id,
+        assigneeId: admin.id,
+        reporterId: admin.id,
         sortOrder: 1000,
       },
     }),
@@ -111,8 +95,8 @@ async function main() {
         description: 'Create the drag-and-drop Kanban board with status columns and ticket cards.',
         statusColumnId: colToDo.id,
         priority: Priority.MEDIUM,
-        assigneeId: bob.id,
-        reporterId: alice.id,
+        assigneeId: admin.id,
+        reporterId: admin.id,
         sortOrder: 2000,
       },
     }),
@@ -124,8 +108,8 @@ async function main() {
         description: 'Build the ticket creation dialog with title, description (Markdown), priority, and assignee fields.',
         statusColumnId: colInProgress.id,
         priority: Priority.HIGH,
-        assigneeId: alice.id,
-        reporterId: bob.id,
+        assigneeId: admin.id,
+        reporterId: admin.id,
         sortOrder: 1000,
       },
     }),
@@ -137,8 +121,8 @@ async function main() {
         description: 'Comments support Markdown. Include an activity log alongside the comment thread.',
         statusColumnId: colInReview.id,
         priority: Priority.MEDIUM,
-        assigneeId: bob.id,
-        reporterId: alice.id,
+        assigneeId: admin.id,
+        reporterId: admin.id,
         sortOrder: 1000,
       },
     }),
@@ -150,8 +134,8 @@ async function main() {
         description: 'Configure Docker Compose for local development with hot-reload for backend and frontend.',
         statusColumnId: colDone.id,
         priority: Priority.LOW,
-        assigneeId: alice.id,
-        reporterId: alice.id,
+        assigneeId: admin.id,
+        reporterId: admin.id,
         sortOrder: 1000,
       },
     }),
@@ -176,17 +160,12 @@ async function main() {
     data: [
       {
         ticketId: t1.id,
-        authorId: bob.id,
-        body: 'Should we use OAuth 2.0 or email/password auth for this?',
-      },
-      {
-        ticketId: t1.id,
-        authorId: alice.id,
-        body: 'Google OAuth 2.0 only — no passwords. See the architecture doc for the full flow.',
+        authorId: admin.id,
+        body: 'Email/password only for now — no OAuth. See the architecture doc for the full flow.',
       },
       {
         ticketId: t3.id,
-        authorId: bob.id,
+        authorId: admin.id,
         body: 'Remember to add Zod validation on the backend endpoint too, not just the form.',
       },
     ],
@@ -194,6 +173,7 @@ async function main() {
 
   console.log('Created comments');
   console.log('Seed complete.');
+  console.log('Demo login: admin@trakk.local / admin123');
 }
 
 main()

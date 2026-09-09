@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Sun, Moon, Upload, Trash2, Unlink, AlertTriangle } from "lucide-react";
+import { Sun, Moon, Upload, Trash2, AlertTriangle } from "lucide-react";
 import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from "react-image-crop";
 import { toast } from "sonner";
 import "react-image-crop/dist/ReactCrop.css";
@@ -9,7 +9,6 @@ import "react-image-crop/dist/ReactCrop.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +43,7 @@ function centerAspectCrop(mediaWidth: number, mediaHeight: number, aspect: numbe
 }
 
 export default function ProfilePage() {
-  const { profile, loading, updateDisplayName, uploadAvatar, removeAvatar, disconnectGoogle, deleteAccount } =
+  const { profile, loading, updateDisplayName, uploadAvatar, removeAvatar, deleteAccount } =
     useProfile();
   const { theme, setTheme } = useTheme(
     (profile?.themePreference as "light" | "dark") ?? "light",
@@ -64,9 +63,7 @@ export default function ProfilePage() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Dialogs
-  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [typedEmail, setTypedEmail] = useState("");
 
@@ -197,19 +194,6 @@ export default function ProfilePage() {
       toast.success("Avatar removed");
     } catch {
       toast.error("Failed to remove avatar");
-    }
-  };
-
-  const handleDisconnectGoogle = async () => {
-    setDisconnecting(true);
-    try {
-      await disconnectGoogle();
-      setDisconnectDialogOpen(false);
-      toast.success("Google account disconnected");
-    } catch {
-      toast.error("Failed to disconnect Google account");
-    } finally {
-      setDisconnecting(false);
     }
   };
 
@@ -414,55 +398,9 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      {/* Google Account card */}
-      <section className="rounded-card bg-trakk-surface border border-trakk-border shadow-card p-6 space-y-4">
-        <h2 className="font-display font-semibold text-lg text-trakk-text">Google Account</h2>
-
-        <div className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-body text-trakk-text truncate">
-              {profile.googleEmail ?? profile.email}
-            </p>
-            <p className="text-[12px] font-body text-trakk-text-secondary">
-              Used for Google Calendar and Google Meet integration.
-            </p>
-          </div>
-          {profile.googleConnected ? (
-            <Badge variant="teal">Connected</Badge>
-          ) : (
-            <Badge variant="neutral">Not connected</Badge>
-          )}
-        </div>
-      </section>
-
       {/* Danger Zone card */}
       <section className="rounded-card bg-trakk-surface border border-[rgba(255,71,87,0.25)] shadow-card p-6 space-y-5">
         <h2 className="font-display font-semibold text-lg text-status-error">Danger Zone</h2>
-
-        {/* Disconnect Google */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[14px] font-body font-medium text-trakk-text">
-              Disconnect Google Account
-            </p>
-            <p className="text-[13px] font-body text-trakk-text-secondary">
-              Removes Calendar and Meet access. You will need to reconnect to schedule meetings.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            className="shrink-0"
-            onClick={() => setDisconnectDialogOpen(true)}
-            disabled={!profile.googleConnected}
-          >
-            <Unlink size={14} />
-            Disconnect
-          </Button>
-        </div>
-
-        <div className="h-px bg-[rgba(255,71,87,0.15)]" />
 
         {/* Delete Account */}
         <div className="flex items-start justify-between gap-4">
@@ -484,34 +422,6 @@ export default function ProfilePage() {
           </Button>
         </div>
       </section>
-
-      {/* Disconnect Google dialog */}
-      <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Disconnect Google Account?</DialogTitle>
-            <DialogDescription>
-              This will revoke Trakk&apos;s access to your Google Calendar and Google Meet. Existing
-              meetings will not be deleted. You can reconnect at any time.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="secondary">
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleDisconnectGoogle}
-              disabled={disconnecting}
-            >
-              {disconnecting ? "Disconnecting..." : "Disconnect"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Delete account dialog */}
       <Dialog

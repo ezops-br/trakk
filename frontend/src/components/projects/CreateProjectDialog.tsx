@@ -22,6 +22,7 @@ export const createProjectSchema = z.object({
     .string()
     .regex(/^[A-Z0-9]{2,10}$/, 'Key must be 2-10 uppercase letters and digits'),
   description: z.string().max(500).optional().nullable(),
+  dueDate: z.string().nullable().optional(),
 });
 
 const LABEL_CLASS =
@@ -48,6 +49,7 @@ export function CreateProjectDialog({
   const [name, setName] = React.useState('');
   const [key, setKey] = React.useState('');
   const [description, setDescription] = React.useState('');
+  const [dueDate, setDueDate] = React.useState('');
   const [keyEdited, setKeyEdited] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [fieldErrors, setFieldErrors] = React.useState<{
@@ -60,6 +62,7 @@ export function CreateProjectDialog({
     setName('');
     setKey('');
     setDescription('');
+    setDueDate('');
     setKeyEdited(false);
     setSubmitting(false);
     setFieldErrors({});
@@ -92,6 +95,7 @@ export function CreateProjectDialog({
       name,
       key,
       description: description.trim() === '' ? null : description,
+      dueDate: dueDate === '' ? null : `${dueDate}T00:00:00.000Z`,
     });
 
     if (!parsed.success) {
@@ -180,6 +184,18 @@ export function CreateProjectDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What is this project about? (optional)"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label htmlFor="project-due-date" className={LABEL_CLASS}>
+              Due date
+            </label>
+            <Input
+              id="project-due-date"
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
             />
           </div>
 

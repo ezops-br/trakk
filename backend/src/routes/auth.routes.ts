@@ -6,19 +6,12 @@ import { requireAuth } from '../middleware/auth';
 import { authRateLimit } from '../middleware/rate-limit';
 import { validate } from '../middleware/validate';
 import {
-  generateAuthUrl,
-  exchangeCodeForTokens,
-  decodeIdToken,
-  verifyState,
-} from '../services/google-oauth.service';
-import {
-  upsertUser,
+  verifyCredentials,
   findUserById,
   updateMe,
   disconnectUser,
   uploadAvatar,
   deleteAvatar,
-  softDisconnectGoogle,
 } from '../services/auth.service';
 import { signAccessToken } from '../utils/jwt';
 import { AppError } from '../lib/app-error';
@@ -38,59 +31,40 @@ const patchMeSchema = z
     { message: "At least one field (displayName or themePreference) must be provided" },
   );
 
-export const authRouter = Router();
-
-// GET /google — initiate OAuth flow
-authRouter.get('/google', authRateLimit, (req, res) => {
-  const { url, state } = generateAuthUrl();
-  res.cookie('oauth_state', state, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: config.NODE_ENV === 'production',
-    maxAge: 10 * 60 * 1000,
-  });
-  res.redirect(url);
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
 });
 
-// GET /google/callback — handle OAuth callback
-authRouter.get('/google/callback', authRateLimit, async (req, res) => {
-  if (req.query.error) {
-    res.clearCookie('oauth_state');
-    res.redirect(`${config.CORS_ORIGIN}/login?error=access_denied`);
-    return;
-  }
+export const authRouter = Router();
 
-  const cookieState: string = (req.cookies as Record<string, string>)?.oauth_state ?? '';
-  const queryState: string = (req.query.state as string) ?? '';
+// Shared trakk_session cookie attributes — see config.ts's SESSION_COOKIE_DOMAIN
+// for why domain is conditional. clearCookie must match the exact attributes
+// used to set it (name/domain/path), or the browser treats it as a different
+// cookie and the original is never actually removed.
+const sessionCookieOptions = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: config.NODE_ENV === 'production',
+  ...(config.SESSION_COOKIE_DOMAIN ? { domain: config.SESSION_COOKIE_DOMAIN } : {}),
+};
 
-  if (!verifyState(cookieState, queryState)) {
-    res.clearCookie('oauth_state');
-    res.redirect(`${config.CORS_ORIGIN}/login?error=state_mismatch`);
-    return;
-  }
-
-  res.clearCookie('oauth_state');
-
+// No self-serve registration by design — users are provisioned via prisma/seed.ts only.
+// POST /login
+authRouter.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
   try {
-    const tokens = await exchangeCodeForTokens(req.query.code as string);
-    const profile = decodeIdToken(tokens.id_token);
-    const user = await upsertUser(profile, tokens);
+    const { email, password } = req.body as { email: string; password: string };
+    const user = await verifyCredentials(email, password);
     const jwt = signAccessToken({ userId: user.id, email: user.email });
 
     res.cookie('trakk_session', jwt, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.NODE_ENV === 'production',
+      ...sessionCookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.redirect(`${config.CORS_ORIGIN}/callback`);
+    res.status(200).json(user);
   } catch (error) {
-    if (error instanceof AppError && error.statusCode === 409) {
-      res.redirect(`${config.CORS_ORIGIN}/login?error=account_conflict`);
-      return;
-    }
-    res.redirect(`${config.CORS_ORIGIN}/login?error=auth_failed`);
+    next(error);
   }
 });
 
@@ -117,11 +91,7 @@ authRouter.patch('/me', requireAuth, validate(patchMeSchema), async (req, res, n
 
 // POST /logout
 authRouter.post('/logout', requireAuth, (req, res) => {
-  res.clearCookie('trakk_session', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: config.NODE_ENV === 'production',
-  });
+  res.clearCookie('trakk_session', sessionCookieOptions);
   res.status(200).json({ message: 'Logged out' });
 });
 
@@ -129,11 +99,7 @@ authRouter.post('/logout', requireAuth, (req, res) => {
 authRouter.post('/disconnect', requireAuth, async (req, res, next) => {
   try {
     await disconnectUser(req.user!.userId);
-    res.clearCookie('trakk_session', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.NODE_ENV === 'production',
-    });
+    res.clearCookie('trakk_session', sessionCookieOptions);
     res.status(200).json({ message: 'Account disconnected' });
   } catch (error) {
     next(error);
@@ -148,27 +114,8 @@ authRouter.delete('/me', requireAuth, async (req, res, next) => {
   }
   try {
     await disconnectUser(req.user!.userId);
-    res.clearCookie('trakk_session', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.NODE_ENV === 'production',
-    });
+    res.clearCookie('trakk_session', sessionCookieOptions);
     res.status(200).json({ message: 'Account deleted' });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /google/disconnect — soft Google disconnect (removes OAuthAccount, ends session)
-authRouter.post('/google/disconnect', requireAuth, async (req, res, next) => {
-  try {
-    await softDisconnectGoogle(req.user!.userId);
-    res.clearCookie('trakk_session', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.NODE_ENV === 'production',
-    });
-    res.status(200).json({ message: 'Google account disconnected' });
   } catch (error) {
     next(error);
   }

@@ -7,11 +7,11 @@ import {
   updateTicketSchema,
   listTicketsSchema,
   reorderTicketsSchema,
-  archiveTicketSchema,
   addLabelSchema,
   ticketParamsSchema,
   ticketLabelParamsSchema,
   projectParamsSchema,
+  bulkUpdateTicketsSchema,
 } from './ticket.schemas';
 
 export const ticketRouter = Router();
@@ -50,6 +50,26 @@ ticketRouter.post(
         req.body,
       );
       res.status(201).json({ ticket });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// PATCH /:projectId/tickets/bulk — bulk-update up to 100 tickets (MEMBER or OWNER).
+// MUST be registered before any /:ticketNumber route so "bulk" is not parsed as a number.
+ticketRouter.patch(
+  '/:projectId/tickets/bulk',
+  validate(projectParamsSchema, 'params'),
+  validate(bulkUpdateTicketsSchema),
+  async (req, res, next) => {
+    try {
+      const result = await ticketService.bulkUpdate(
+        req.user!.userId,
+        req.params.projectId,
+        req.body,
+      );
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -115,38 +135,36 @@ ticketRouter.patch(
   },
 );
 
-// DELETE /:projectId/tickets/:ticketNumber — delete a ticket (MEMBER or OWNER)
-ticketRouter.delete(
-  '/:projectId/tickets/:ticketNumber',
+// GET /:projectId/tickets/:ticketNumber/deletion-impact — preview dependency counts before delete (any member)
+ticketRouter.get(
+  '/:projectId/tickets/:ticketNumber/deletion-impact',
   validate(ticketParamsSchema, 'params'),
   async (req, res, next) => {
     try {
-      await ticketService.deleteTicket(
+      const result = await ticketService.getDeletionImpact(
         req.user!.userId,
         req.params.projectId,
         Number(req.params.ticketNumber),
       );
-      res.status(204).send();
+      res.json(result);
     } catch (error) {
       next(error);
     }
   },
 );
 
-// PATCH /:projectId/tickets/:ticketNumber/archive — archive or restore (MEMBER or OWNER)
-ticketRouter.patch(
-  '/:projectId/tickets/:ticketNumber/archive',
+// DELETE /:projectId/tickets/:ticketNumber — delete a ticket (MEMBER or OWNER)
+ticketRouter.delete(
+  '/:projectId/tickets/:ticketNumber',
   validate(ticketParamsSchema, 'params'),
-  validate(archiveTicketSchema),
   async (req, res, next) => {
     try {
-      const ticket = await ticketService.toggleArchiveTicket(
+      const result = await ticketService.deleteTicket(
         req.user!.userId,
         req.params.projectId,
         Number(req.params.ticketNumber),
-        req.body.archive,
       );
-      res.json({ ticket });
+      res.status(200).json(result);
     } catch (error) {
       next(error);
     }

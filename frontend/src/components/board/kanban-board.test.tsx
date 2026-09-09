@@ -1,165 +1,250 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 
-// Captures the onDragEnd handler that KanbanBoard hands to DndContext so the
-// drop can be driven directly — dnd-kit pointer sequences are not reproducible
-// in jsdom.
-const mockCaptureDragEnd = vi.fn();
-const mockArchiveTicket = vi.fn();
-const mockDeleteTicket = vi.fn();
-const mockReorderTickets = vi.fn();
-
-vi.mock('@dnd-kit/core', () => ({
-  DndContext: ({
-    children,
-    onDragEnd,
-  }: {
-    children: React.ReactNode;
-    onDragEnd: (event: unknown) => void;
-  }) => {
-    mockCaptureDragEnd(onDragEnd);
-    return React.createElement('div', { 'data-testid': 'dnd-context' }, children);
+// Capture the latest onEvent callback that KanbanBoard passes to
+// useProjectEvents so the test can drive it synchronously.
+let capturedOnEvent: ((event: unknown) => void) | null = null;
+vi.mock('@/hooks/use-project-events', () => ({
+  useProjectEvents: (
+    _projectId: string,
+    onEvent: (event: unknown) => void,
+  ) => {
+    capturedOnEvent = onEvent;
   },
-  DragOverlay: ({ children }: { children: React.ReactNode }) =>
-    React.createElement('div', null, children),
-  PointerSensor: class PointerSensor {},
-  KeyboardSensor: class KeyboardSensor {},
-  useSensor: () => ({}),
-  useSensors: () => [],
-  closestCorners: () => null,
-  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
 }));
 
-vi.mock('@dnd-kit/sortable', () => ({
-  sortableKeyboardCoordinates: () => ({}),
-  arrayMove: (arr: unknown[]) => arr,
+// Mock dnd-kit hooks — they require a DndContext provider which we don't want
+// in unit tests.
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>();
+  return {
+    ...actual,
+    useDroppable: vi.fn(() => ({ setNodeRef: vi.fn(), isOver: false })),
+  };
+});
+
+vi.mock('@dnd-kit/sortable', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/sortable')>();
+  return {
+    ...actual,
+    SortableContext: ({ children }: { children: React.ReactNode }) => (
+      <>{children}</>
+    ),
+  };
+});
+
+vi.mock('@/lib/api-client', () => ({
+  apiClient: {
+    get: vi.fn(),
+    post: vi.fn(),
+    patch: vi.fn(),
+    del: vi.fn(),
+  },
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
   usePathname: () => '/projects/proj-uuid-1/board',
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const MOCK_TICKET = {
+// Mock the data hooks so the test only exercises the SSE handler, not the
+// full board data-fetching flow.
+const MOCK_TICKET_1 = {
   id: 'ticket-uuid-1',
   projectId: 'proj-uuid-1',
-  number: 7,
-  title: 'Fix login bug',
+  number: 1,
+  title: 'Original',
   description: null,
   statusColumnId: 'col-1',
-  priority: 'HIGH' as const,
+  priority: 'MEDIUM' as const,
   assigneeId: null,
-  reporterId: 'user-uuid-1',
-  sortOrder: 1000,
-  archivedAt: null,
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
+  dueDate: null,
+  reporterId: 'user-1',
+  sortOrder: 0,
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
   assignee: null,
-  reporter: { id: 'user-uuid-1', displayName: 'Alice', avatarUrl: null },
+  reporter: { id: 'user-1', displayName: 'A', avatarUrl: null, email: 'a@b.c' },
   statusColumn: { id: 'col-1', name: 'To Do', position: 0 },
   labels: [],
 };
 
+const MOCK_COLUMN = {
+  id: 'col-1',
+  projectId: 'proj-uuid-1',
+  name: 'To Do',
+  position: 0,
+  createdAt: '2024-01-01T00:00:00.000Z',
+};
+
+const MOCK_TICKET_1_OVERDUE = {
+  ...MOCK_TICKET_1,
+  dueDate: '2024-01-01T00:00:00.000Z',
+};
+
 vi.mock('@/hooks/use-columns', () => ({
   useColumns: () => ({
-    columns: [{ id: 'col-1', projectId: 'proj-uuid-1', name: 'To Do', position: 0 }],
+    columns: [MOCK_COLUMN],
     loading: false,
     error: null,
     refetch: vi.fn(),
   }),
 }));
 
+// useTickets owns the local tickets state; the test asserts behavior by
+// spying on its setTickets. We expose the current value via a module-scoped
+// ref so the test can read it after the handler runs.
+const ticketsState: { current: typeof MOCK_TICKET_1[] } = { current: [] };
 vi.mock('@/hooks/use-tickets', () => ({
   useTickets: () => ({
-    tickets: [MOCK_TICKET],
-    total: 1,
-    page: 1,
-    pageSize: 50,
+    tickets: ticketsState.current,
     loading: false,
     error: null,
     createTicket: vi.fn(),
-    deleteTicket: mockDeleteTicket,
-    archiveTicket: mockArchiveTicket,
-    reorderTickets: mockReorderTickets,
-    setTickets: vi.fn(),
+    deleteTicket: vi.fn(),
+    reorderTickets: vi.fn(),
+    setTickets: (updater: (prev: typeof MOCK_TICKET_1[]) => typeof MOCK_TICKET_1[]) => {
+      ticketsState.current = updater(ticketsState.current);
+    },
     refetch: vi.fn(),
   }),
 }));
 
 vi.mock('@/hooks/use-members', () => ({
-  useMembers: () => ({ members: [], loading: false, error: null }),
+  useMembers: () => ({ members: [], loading: false }),
 }));
 
 vi.mock('@/hooks/use-labels', () => ({
-  useLabels: () => ({ labels: [], loading: false, error: null }),
+  useLabels: () => ({ labels: [], loading: false }),
 }));
 
-vi.mock('@/hooks/use-project-events', () => ({
-  useProjectEvents: () => undefined,
+// CreateTicketDialog now calls useTemplates (template picker) and
+// useAddTicketLabel (sequential label attach after create). Both are
+// side-effect-free here — the SSE-handler test never opens the dialog.
+vi.mock('@/hooks/use-templates', () => ({
+  useTemplates: () => ({ templates: [], loading: false }),
+}));
+vi.mock('@/hooks/use-add-ticket-label', () => ({
+  useAddTicketLabel: () => ({ addLabel: vi.fn() }),
 }));
 
-vi.mock('@/hooks/use-board-filters', () => ({
-  useBoardFilters: () => ({
-    filters: { assigneeIds: [], priorities: [], labelIds: [], search: '' },
-    setAssigneeIds: vi.fn(),
-    setPriorities: vi.fn(),
-    setLabelIds: vi.fn(),
-    setSearch: vi.fn(),
-    clearAll: vi.fn(),
-    hasActiveFilters: false,
-  }),
-}));
+vi.mock('@/hooks/use-board-filters', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/hooks/use-board-filters')>();
+  return {
+    ...actual,
+    useBoardFilters: () => ({
+      filters: {
+        assigneeIds: [],
+        priorities: [],
+        labelIds: [],
+        search: '',
+        dueDateFilter: 'all',
+        dueDateFrom: null,
+        dueDateTo: null,
+      },
+      setAssigneeIds: vi.fn(),
+      setPriorities: vi.fn(),
+      setLabelIds: vi.fn(),
+      setSearch: vi.fn(),
+      setDueDateFilter: vi.fn(),
+      sort: 'sortOrder',
+      setSort: vi.fn(),
+      order: 'asc',
+      setOrder: vi.fn(),
+      clearAll: vi.fn(),
+      hasActiveFilters: false,
+    }),
+  };
+});
 
-vi.mock('./board-column', () => ({
-  BoardColumn: () => React.createElement('div', { 'data-testid': 'board-column' }),
-}));
+import { KanbanBoard } from '@/components/board/kanban-board';
+import { apiClient } from '@/lib/api-client';
 
-vi.mock('./board-toolbar', () => ({
-  BoardToolbar: () => React.createElement('div', { 'data-testid': 'board-toolbar' }),
-}));
+const mockGet = apiClient.get as ReturnType<typeof vi.fn>;
+const PROJECT_ID = 'proj-uuid-1';
 
-vi.mock('./ticket-card', () => ({
-  TicketCard: () => React.createElement('div', { 'data-testid': 'ticket-card' }),
-}));
-
-vi.mock('@/components/tickets/create-ticket-dialog', () => ({
-  CreateTicketDialog: () => null,
-}));
-
-vi.mock('@/components/tickets/ticket-detail-sheet', () => ({
-  TicketDetailSheet: () => null,
-}));
-
-import { KanbanBoard } from './kanban-board';
-
-describe('KanbanBoard — drag to trash archives instead of deleting', () => {
+describe('KanbanBoard — ticket.overdue SSE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedOnEvent = null;
+    ticketsState.current = [MOCK_TICKET_1];
   });
 
-  it('calls archiveTicket (not deleteTicket) when a ticket is dropped on the delete zone', async () => {
-    // Arrange
-    render(
-      <KanbanBoard
-        projectId="proj-uuid-1"
-        projectKey="TRAKK"
-        initialRole="MEMBER"
-      />,
-    );
-    await waitFor(() => expect(mockCaptureDragEnd).toHaveBeenCalled());
-    const onDragEnd = mockCaptureDragEnd.mock.calls.at(-1)![0] as (e: unknown) => void;
+  it('refetches the ticket and replaces the matching row in local state', async () => {
+    // Arrange — apiClient.get returns the freshly-fetched overdue ticket.
+    mockGet.mockResolvedValue({ ticket: MOCK_TICKET_1_OVERDUE });
 
-    // Act — drop the ticket onto the trash bin droppable.
-    onDragEnd({
-      active: { id: 'ticket-uuid-1' },
-      over: { id: 'delete-zone' },
+    // Act — render the board; the SSE handler captures via useProjectEvents.
+    render(<KanbanBoard projectId={PROJECT_ID} projectKey="TRAKK" initialRole="OWNER" />);
+    expect(capturedOnEvent).not.toBeNull();
+
+    // Drive the SSE event with the ticket's id (not the number).
+    await act(async () => {
+      capturedOnEvent!({
+        type: 'ticket.overdue',
+        payload: { ticketId: 'ticket-uuid-1' },
+      });
     });
 
-    // Assert — soft delete only; no permanent delete and no reorder side effect.
-    expect(mockArchiveTicket).toHaveBeenCalledWith(7);
-    expect(mockDeleteTicket).not.toHaveBeenCalled();
-    expect(mockReorderTickets).not.toHaveBeenCalled();
+    // Assert — the refetch URL uses the ticket's number, NOT its id.
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalledWith(
+        `/api/v1/projects/${PROJECT_ID}/tickets/${MOCK_TICKET_1.number}`,
+      );
+    });
+    // Local row is replaced with the freshly-fetched (overdue) ticket.
+    expect(ticketsState.current).toHaveLength(1);
+    expect(ticketsState.current[0]).toMatchObject({
+      id: 'ticket-uuid-1',
+      dueDate: '2024-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('no-ops when the ticket is not in local state', async () => {
+    // Arrange — the ticketId in the event is unknown to the local state.
+    mockGet.mockResolvedValue({ ticket: MOCK_TICKET_1_OVERDUE });
+
+    // Act
+    render(<KanbanBoard projectId={PROJECT_ID} projectKey="TRAKK" initialRole="OWNER" />);
+    await act(async () => {
+      capturedOnEvent!({
+        type: 'ticket.overdue',
+        payload: { ticketId: 'unknown-ticket-id' },
+      });
+    });
+
+    // Assert — no fetch made; local state untouched.
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(ticketsState.current).toEqual([MOCK_TICKET_1]);
+  });
+
+  it('swallows fetch errors and leaves local state intact', async () => {
+    // Arrange — refetch fails (network blip).
+    mockGet.mockRejectedValue(new Error('Network error'));
+
+    // Act
+    render(<KanbanBoard projectId={PROJECT_ID} projectKey="TRAKK" initialRole="OWNER" />);
+    await act(async () => {
+      capturedOnEvent!({
+        type: 'ticket.overdue',
+        payload: { ticketId: 'ticket-uuid-1' },
+      });
+    });
+
+    // Assert — the fetch was attempted, but local state was not replaced.
+    await waitFor(() => {
+      expect(mockGet).toHaveBeenCalled();
+    });
+    expect(ticketsState.current).toEqual([MOCK_TICKET_1]);
   });
 });

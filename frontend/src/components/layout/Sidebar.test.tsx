@@ -1,7 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import type { ProjectWithRole } from '@/lib/types';
 
 // Mock dependencies before importing the component
 vi.mock('@/lib/api-client', () => ({
@@ -34,19 +33,12 @@ const mockGet = apiClient.get as ReturnType<typeof vi.fn>;
 const mockUsePathname = usePathname as ReturnType<typeof vi.fn>;
 const mockUseRouter = useRouter as ReturnType<typeof vi.fn>;
 
-// Mocks apiClient.get to respond with an active projects list, mirroring the
-// real backend contract: /api/v1/projects.
-function setupMockGet(activeProjects: ProjectWithRole[] = []) {
-  mockGet.mockImplementation(() => Promise.resolve({ projects: activeProjects }));
-}
-
 describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
     mockUsePathname.mockReturnValue('/');
     mockUseRouter.mockReturnValue({ push: vi.fn() });
-    setupMockGet([]);
+    mockGet.mockResolvedValue({ projects: [] });
   });
 
   it('renders compact Plus button with aria-label="New project" in Projects heading row', async () => {
@@ -95,49 +87,5 @@ describe('Sidebar', () => {
     expect(dispatchedEvents).toContain('open-create-project-dialog');
 
     window.removeEventListener('open-create-project-dialog', listener);
-  });
-
-  // ─── Archived section removal regression guards ─────────────────────────
-  // These assert the "Archived" sidebar section is fully gone. They must FAIL
-  // right now — the section still renders and the sidebar still calls the
-  // /api/v1/projects/archived endpoint — until the builder removes it.
-
-  it('does not render an "Archived" section, heading, toggle, or empty-state text, for any role', async () => {
-    render(<Sidebar />);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Archived')).toBeNull();
-      expect(screen.queryByText('No archived projects')).toBeNull();
-      expect(screen.queryByRole('button', { name: /archived/i })).toBeNull();
-    });
-  });
-
-  it('fetches only /api/v1/projects on mount and on "project-list-changed", never /api/v1/projects/archived', async () => {
-    render(<Sidebar />);
-
-    await waitFor(() => {
-      expect(mockGet).toHaveBeenCalledWith('/api/v1/projects');
-    });
-
-    mockGet.mockClear();
-
-    window.dispatchEvent(new Event('project-list-changed'));
-
-    await waitFor(() => {
-      expect(mockGet).toHaveBeenCalledWith('/api/v1/projects');
-    });
-
-    expect(mockGet).not.toHaveBeenCalledWith('/api/v1/projects/archived');
-  });
-
-  it('renders normally with no errors when localStorage["trakk-sidebar-archived-open"] is already set to "true" from a prior session', async () => {
-    localStorage.setItem('trakk-sidebar-archived-open', 'true');
-
-    expect(() => render(<Sidebar />)).not.toThrow();
-
-    await waitFor(() => {
-      expect(screen.queryByText('Archived')).toBeNull();
-      expect(screen.queryByText('No archived projects')).toBeNull();
-    });
   });
 });

@@ -37,6 +37,7 @@ const MOCK_TICKET = {
   statusColumnId: 'col-1',
   priority: 'MEDIUM' as const,
   assigneeId: null,
+  dueDate: null,
   reporterId: 'user-uuid-1',
   sortOrder: 1,
   createdAt: '2024-01-01T00:00:00.000Z',
@@ -127,34 +128,6 @@ describe('useTickets', () => {
     });
   });
 
-  it('archiveTicket PATCHes .../archive with { archive: true } and drops the ticket from state', async () => {
-    // Arrange
-    mockGet.mockResolvedValue({
-      tickets: [MOCK_TICKET, MOCK_TICKET_2],
-      total: 2,
-      page: 1,
-      pageSize: 50,
-    });
-    mockPatch.mockResolvedValue({ ticket: { ...MOCK_TICKET_2, archivedAt: '2026-08-21T10:00:00.000Z' } });
-
-    // Act
-    const { result } = renderHook(() => useTickets(PROJECT_ID));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.archiveTicket(2);
-    });
-
-    // Assert — soft delete: PATCH the archive endpoint, never DELETE the ticket.
-    expect(mockPatch).toHaveBeenCalledWith(
-      `/api/v1/projects/${PROJECT_ID}/tickets/2/archive`,
-      { archive: true },
-    );
-    expect(apiClient.del).not.toHaveBeenCalled();
-    expect(result.current.tickets.map((t) => t.number)).toEqual([1]);
-    expect(result.current.total).toBe(1);
-  });
-
   it('reorderTickets reverts to the original order when the request fails', async () => {
     // Arrange
     mockGet.mockResolvedValue({
@@ -178,5 +151,28 @@ describe('useTickets', () => {
     // Assert — sortOrder reverted to the original value after the failure
     const reverted = result.current.tickets.find((t) => t.id === 'ticket-uuid-2');
     expect(reverted?.sortOrder).toBe(2);
+  });
+
+  it('appends dueDateFilter, dueDateFrom, and dueDateTo to the query string when those fields are passed', async () => {
+    // Arrange
+    mockGet.mockResolvedValue({ tickets: [], total: 0, page: 1, pageSize: 50 });
+
+    // Act
+    const { result } = renderHook(() =>
+      useTickets(PROJECT_ID, {
+        dueDateFilter: 'overdue',
+        dueDateFrom: '2026-07-20',
+        dueDateTo: '2026-07-25',
+      }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // Assert — all three params appear in the GET URL
+    expect(mockGet).toHaveBeenCalled();
+    const calledUrl = mockGet.mock.calls[0][0] as string;
+    expect(calledUrl).toContain(`/api/v1/projects/${PROJECT_ID}/tickets`);
+    expect(calledUrl).toContain('dueDateFilter=overdue');
+    expect(calledUrl).toContain('dueDateFrom=2026-07-20');
+    expect(calledUrl).toContain('dueDateTo=2026-07-25');
   });
 });

@@ -227,23 +227,3 @@ describe('search', () => {
     expect(result.tickets.length).toBeLessThanOrEqual(5);
   });
 });
-
-// ─── archived ticket exclusion ────────────────────────────────────────────────
-
-describe('searchTickets — archived tickets', () => {
-  it('adds an archived_at IS NULL predicate for tickets to the FTS query', async () => {
-    // Arrange — a plain-text query so call 0 is the FTS statement.
-    mockPrisma.projectMember.findMany.mockResolvedValue([MOCK_MEMBERSHIP_1]);
-    (prisma.$queryRaw as jest.Mock).mockResolvedValue([]);
-
-    // Act
-    await search(USER_ID, 'login bug');
-
-    // Assert — $queryRaw is tagged-template invoked, so call[0][0] is the
-    // TemplateStringsArray holding the literal SQL fragments.
-    const ftsSql = ((prisma.$queryRaw as jest.Mock).mock.calls[0][0] as string[])
-      .join(' ')
-      .replace(/\s+/g, ' ');
-    expect(ftsSql).toMatch(/t\."?archived_at"?\s+IS\s+NULL/i);
-  });
-});

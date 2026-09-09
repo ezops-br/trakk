@@ -15,10 +15,11 @@ import { memberRouter } from './routes/member.routes';
 import { columnRouter } from './routes/column.routes';
 import { ticketRouter } from './routes/ticket.routes';
 import { labelRouter } from './routes/label.routes';
+import { ticketTemplateRouter } from './routes/ticket-template.routes';
 import { eventsRouter } from './routes/events.routes';
 import { commentRouter } from './routes/comment.routes';
-import { meetingRouter } from './routes/meeting.routes';
-import { calendarRouter } from './routes/calendar.routes';
+import { ticketLinkRouter } from './routes/ticket-link.routes';
+import { ticketAttachmentRouter } from './routes/ticket-attachment.routes';
 import { dashboardRouter } from './routes/dashboard.routes';
 import { searchRouter } from './routes/search.routes';
 
@@ -28,7 +29,10 @@ const app = express();
 app.set('trust proxy', 1);
 
 app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
+// See config.ts's DISABLE_APP_CORS for why this is conditional.
+if (config.DISABLE_APP_CORS !== 'true') {
+  app.use(cors({ origin: config.CORS_ORIGIN, credentials: true }));
+}
 app.use(express.json());
 app.use(morgan('combined'));
 app.use(cookieParser());
@@ -53,19 +57,28 @@ app.get('/api/v1/health', async (_req, res) => {
 // Serve uploaded avatars
 app.use(
   '/api/v1/uploads/avatars',
+  (_req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
   express.static(path.join(process.cwd(), process.env.AVATAR_UPLOAD_DIR ?? 'uploads/avatars')),
 );
 
+// Ticket attachments are no longer served as static files from disk; bytes
+// live in Postgres and are streamed via the authenticated GET .../raw route
+// on the ticket-attachment router. Keeping the avatars mount above — the
+// avatar storage path is unchanged.
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/projects', apiRateLimit, projectRouter);
 app.use('/api/v1/projects', apiRateLimit, memberRouter);
 app.use('/api/v1/projects', apiRateLimit, columnRouter);
 app.use('/api/v1/projects', apiRateLimit, ticketRouter);
 app.use('/api/v1/projects', apiRateLimit, labelRouter);
+app.use('/api/v1/projects', apiRateLimit, ticketTemplateRouter);
 app.use('/api/v1/projects', apiRateLimit, eventsRouter);
 app.use('/api/v1/projects', apiRateLimit, commentRouter);
-app.use('/api/v1/projects', apiRateLimit, meetingRouter);
-app.use('/api/v1/calendar', apiRateLimit, calendarRouter);
+app.use('/api/v1/projects', apiRateLimit, ticketLinkRouter);
+app.use('/api/v1/projects', apiRateLimit, ticketAttachmentRouter);
 app.use('/api/v1/dashboard', apiRateLimit, dashboardRouter);
 app.use('/api/v1/search', apiRateLimit, searchRouter);
 

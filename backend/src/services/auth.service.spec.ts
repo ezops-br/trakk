@@ -1,4 +1,4 @@
-import { upsertUser, findUserById, disconnectUser, updateMe, uploadAvatar, deleteAvatar, softDisconnectGoogle } from './auth.service';
+import { verifyCredentials, findUserById, disconnectUser, updateMe, uploadAvatar, deleteAvatar } from './auth.service';
 import { AppError } from '../lib/app-error';
 
 // Mock prisma
@@ -7,12 +7,6 @@ jest.mock('../lib/prisma', () => ({
     user: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    oAuthAccount: {
-      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -33,15 +27,10 @@ jest.mock('../lib/prisma', () => ({
   },
 }));
 
-// Mock crypto utilities
-jest.mock('../utils/crypto', () => ({
-  encrypt: jest.fn((input: string) => `encrypted:${input}`),
-  decrypt: jest.fn((input: string) => input.replace(/^encrypted:/, '')),
-}));
-
-// Mock google-oauth service
-jest.mock('../services/google-oauth.service', () => ({
-  revokeToken: jest.fn().mockResolvedValue(undefined),
+// Mock password utilities
+jest.mock('../utils/password', () => ({
+  comparePassword: jest.fn(),
+  hashPassword: jest.fn(),
 }));
 
 // Mock avatar-storage
@@ -59,42 +48,18 @@ jest.mock('file-type', () => ({
 }), { virtual: true });
 
 import { prisma } from '../lib/prisma';
-import { encrypt, decrypt } from '../utils/crypto';
-import { revokeToken } from '../services/google-oauth.service';
+import { comparePassword } from '../utils/password';
 import { avatarStorage } from '../lib/avatar-storage';
 import * as fileType from 'file-type';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
-const mockEncrypt = encrypt as jest.MockedFunction<typeof encrypt>;
-const mockDecrypt = decrypt as jest.MockedFunction<typeof decrypt>;
-const mockRevokeToken = revokeToken as jest.MockedFunction<typeof revokeToken>;
+const mockComparePassword = comparePassword as jest.MockedFunction<typeof comparePassword>;
 const mockAvatarStorage = avatarStorage as jest.Mocked<typeof avatarStorage>;
 const mockFileTypeFromBuffer = fileType.fileTypeFromBuffer as jest.MockedFunction<typeof fileType.fileTypeFromBuffer>;
-
-const GOOGLE_PROFILE = {
-  sub: 'google-sub-123',
-  email: 'alice@example.com',
-  name: 'Alice Smith',
-  picture: 'https://example.com/avatar.jpg',
-};
-
-const TOKENS = {
-  access_token: 'access-token-abc',
-  refresh_token: 'refresh-token-xyz',
-  id_token: 'id-token-123',
-  expiry_date: Date.now() + 3600 * 1000,
-};
-
-const TOKENS_NO_REFRESH = {
-  access_token: 'access-token-abc',
-  id_token: 'id-token-123',
-  expiry_date: Date.now() + 3600 * 1000,
-};
 
 const EXISTING_USER = {
   id: 'user-uuid-1',
   email: 'alice@example.com',
-  googleId: 'google-sub-123',
   displayName: 'Alice Smith',
   avatarUrl: 'https://example.com/avatar.jpg',
   themePreference: 'light',
@@ -102,143 +67,66 @@ const EXISTING_USER = {
   updatedAt: new Date(),
 };
 
-const USER_ID = 'user-uuid-1';
-
-const EXISTING_OAUTH_ACCOUNT = {
-  id: 'oauth-uuid-1',
-  userId: USER_ID,
-  provider: 'google',
-  providerId: 'google-sub-123',
-  accessTokenEnc: 'encrypted:old-access-token',
-  refreshTokenEnc: 'encrypted:old-refresh-token',
-  user: {
-    id: USER_ID,
-    email: 'alice@example.com',
-    displayName: 'Alice Smith',
-    avatarUrl: 'https://example.com/avatar.jpg',
-    avatarStoragePath: null,
-    googleAvatarUrl: 'https://example.com/avatar.jpg',
-  },
+const EXISTING_USER_WITH_PASSWORD = {
+  id: EXISTING_USER.id,
+  email: EXISTING_USER.email,
+  displayName: EXISTING_USER.displayName,
+  avatarUrl: EXISTING_USER.avatarUrl,
+  themePreference: EXISTING_USER.themePreference,
+  passwordHash: 'hashed-password-value',
 };
 
-describe('upsertUser', () => {
+describe('verifyCredentials', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('creates a new User and OAuthAccount for a first-time login (googleId not found, email not found)', async () => {
+  it('returns the safe user object when email and password are correct', async () => {
     // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
-    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
-    const createdUser = { ...EXISTING_USER };
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue(createdUser);
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(EXISTING_USER_WITH_PASSWORD);
+    mockComparePassword.mockResolvedValue(true);
 
     // Act
-    const result = await upsertUser(GOOGLE_PROFILE, TOKENS);
+    const result = await verifyCredentials('alice@example.com', 'correct-password');
 
     // Assert
-    expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
-    const createCall = (mockPrisma.user.create as jest.Mock).mock.calls[0][0];
-    expect(createCall.data.email).toBe(GOOGLE_PROFILE.email);
-    expect(createCall.data.googleId).toBe(GOOGLE_PROFILE.sub);
-    expect(result.id).toBe(createdUser.id);
+    expect(result).toEqual({
+      id: EXISTING_USER.id,
+      email: EXISTING_USER.email,
+      displayName: EXISTING_USER.displayName,
+      avatarUrl: EXISTING_USER.avatarUrl,
+      themePreference: EXISTING_USER.themePreference,
+    });
+    expect(result).not.toHaveProperty('passwordHash');
   });
 
-  it('updates profile fields and access token for a returning user (googleId found)', async () => {
+  it('throws a 401 "Invalid email or password" error when the password is wrong', async () => {
     // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-    (mockPrisma.user.update as jest.Mock).mockResolvedValue(EXISTING_USER);
-    (mockPrisma.oAuthAccount.update as jest.Mock).mockResolvedValue({ ...EXISTING_OAUTH_ACCOUNT });
-
-    // Act
-    const result = await upsertUser(GOOGLE_PROFILE, TOKENS);
-
-    // Assert
-    expect(mockPrisma.oAuthAccount.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ provider: 'google', providerId: GOOGLE_PROFILE.sub }),
-      }),
-    );
-    expect(mockPrisma.oAuthAccount.update).toHaveBeenCalledTimes(1);
-    expect(result).toBeDefined();
-  });
-
-  it('updates email on the existing user when the returning user changed their Google email', async () => {
-    // Arrange
-    const accountWithOldEmail = { ...EXISTING_OAUTH_ACCOUNT };
-    const userWithOldEmail = { ...EXISTING_USER, email: 'old@example.com' };
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(accountWithOldEmail);
-    (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...userWithOldEmail, email: GOOGLE_PROFILE.email });
-    (mockPrisma.oAuthAccount.update as jest.Mock).mockResolvedValue(accountWithOldEmail);
-
-    const newProfile = { ...GOOGLE_PROFILE, email: 'newemail@example.com' };
-
-    // Act
-    await upsertUser(newProfile, TOKENS);
-
-    // Assert
-    const updateCall = (mockPrisma.user.update as jest.Mock).mock.calls[0][0];
-    expect(updateCall.data.email).toBe(newProfile.email);
-  });
-
-  it('preserves existing refreshTokenEnc when Google omits refresh_token', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-    (mockPrisma.user.update as jest.Mock).mockResolvedValue(EXISTING_USER);
-    (mockPrisma.oAuthAccount.update as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-
-    // Act
-    await upsertUser(GOOGLE_PROFILE, TOKENS_NO_REFRESH);
-
-    // Assert
-    const updateCall = (mockPrisma.oAuthAccount.update as jest.Mock).mock.calls[0][0];
-    // Should not overwrite refreshTokenEnc when refresh_token is absent
-    expect(updateCall.data.refreshTokenEnc).toBeUndefined();
-  });
-
-  it('overwrites refreshTokenEnc when Google provides a new refresh_token', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-    (mockPrisma.user.update as jest.Mock).mockResolvedValue(EXISTING_USER);
-    (mockPrisma.oAuthAccount.update as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-
-    // Act
-    await upsertUser(GOOGLE_PROFILE, TOKENS);
-
-    // Assert
-    const updateCall = (mockPrisma.oAuthAccount.update as jest.Mock).mock.calls[0][0];
-    expect(updateCall.data.refreshTokenEnc).toBe(`encrypted:${TOKENS.refresh_token}`);
-  });
-
-  it('encrypts both access_token and refresh_token before storage', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
-    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(null);
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue(EXISTING_USER);
-
-    // Act
-    await upsertUser(GOOGLE_PROFILE, TOKENS);
-
-    // Assert
-    expect(mockEncrypt).toHaveBeenCalledWith(TOKENS.access_token);
-    expect(mockEncrypt).toHaveBeenCalledWith(TOKENS.refresh_token);
-    const createCall = (mockPrisma.user.create as jest.Mock).mock.calls[0][0];
-    const oauthData = createCall.data.oauthAccounts?.create ?? createCall.data.oauthAccounts;
-    if (oauthData) {
-      expect(oauthData.accessTokenEnc).toBe(`encrypted:${TOKENS.access_token}`);
-      expect(oauthData.refreshTokenEnc).toBe(`encrypted:${TOKENS.refresh_token}`);
-    }
-  });
-
-  it('throws a 409 conflict when a new googleId attempts to register with an email already in use by a different account', async () => {
-    // Arrange — no oauth account for this googleId, but email is taken by a different user
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
-    const differentUser = { ...EXISTING_USER, googleId: 'different-google-id' };
-    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(differentUser);
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(EXISTING_USER_WITH_PASSWORD);
+    mockComparePassword.mockResolvedValue(false);
 
     // Act & Assert
-    await expect(upsertUser(GOOGLE_PROFILE, TOKENS)).rejects.toThrow(AppError);
-    await expect(upsertUser(GOOGLE_PROFILE, TOKENS)).rejects.toMatchObject({ statusCode: 409 });
+    await expect(verifyCredentials('alice@example.com', 'wrong-password')).rejects.toThrow(AppError);
+    await expect(verifyCredentials('alice@example.com', 'wrong-password')).rejects.toMatchObject({
+      statusCode: 401,
+      message: 'Invalid email or password',
+    });
+  });
+
+  it('throws the SAME 401 "Invalid email or password" error for an unknown email (anti-enumeration)', async () => {
+    // Arrange
+    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+
+    // Act & Assert
+    await expect(verifyCredentials('nobody@example.com', 'whatever')).rejects.toThrow(AppError);
+    await expect(verifyCredentials('nobody@example.com', 'whatever')).rejects.toMatchObject({
+      statusCode: 401,
+      message: 'Invalid email or password',
+    });
+    // comparePassword must not be called (or if it is, does not affect the outcome) —
+    // the important behavior is that unknown-email and wrong-password produce an
+    // identical error, so callers cannot distinguish which case occurred.
+    expect(mockComparePassword).not.toHaveBeenCalled();
   });
 });
 
@@ -380,7 +268,6 @@ describe('disconnectUser', () => {
     // Arrange — user is member of no projects
     (mockPrisma.projectMember.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 3 });
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
     (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
 
     // Act
@@ -405,7 +292,6 @@ describe('disconnectUser', () => {
       .mockResolvedValueOnce([{ id: 'pm-1', userId, role: 'OWNER' }]); // all members of proj-1 => only this user
     (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
     (mockPrisma.project.delete as jest.Mock).mockResolvedValue({});
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
     (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
 
     // Act
@@ -432,7 +318,6 @@ describe('disconnectUser', () => {
     (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue(null); // no other owner
     (mockPrisma.projectMember.update as jest.Mock).mockResolvedValue({});
     (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
     (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
 
     // Act
@@ -460,7 +345,6 @@ describe('disconnectUser', () => {
       .mockResolvedValueOnce(allProjectMembers);
     (mockPrisma.projectMember.findFirst as jest.Mock).mockResolvedValue({ id: 'pm-2', userId: 'other-owner', role: 'OWNER' });
     (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
     (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
 
     // Act
@@ -472,76 +356,6 @@ describe('disconnectUser', () => {
     expect(mockPrisma.user.delete).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: userId } }),
     );
-  });
-
-  it('calls revokeToken with the decrypted refresh token after user deletion', async () => {
-    // Arrange
-    (mockPrisma.projectMember.findMany as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      ...EXISTING_OAUTH_ACCOUNT,
-      refreshTokenEnc: 'encrypted:real-refresh-token',
-    });
-    (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
-
-    // Act
-    await disconnectUser(userId);
-
-    // Assert
-    expect(mockDecrypt).toHaveBeenCalledWith('encrypted:real-refresh-token');
-    expect(mockRevokeToken).toHaveBeenCalledWith('real-refresh-token');
-  });
-
-  it('completes deletion even when revokeToken throws', async () => {
-    // Arrange
-    (mockPrisma.projectMember.findMany as jest.Mock).mockResolvedValue([]);
-    (mockPrisma.ticket.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      ...EXISTING_OAUTH_ACCOUNT,
-      refreshTokenEnc: 'encrypted:real-refresh-token',
-    });
-    (mockPrisma.user.delete as jest.Mock).mockResolvedValue(EXISTING_USER);
-    mockRevokeToken.mockRejectedValueOnce(new Error('Google revoke failed'));
-
-    // Act & Assert — should not throw
-    await expect(disconnectUser(userId)).resolves.not.toThrow();
-    expect(mockPrisma.user.delete).toHaveBeenCalled();
-  });
-});
-
-// --- New tests for profile feature ---
-
-describe('findUserById (extended — googleConnected)', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('returns googleConnected: true when OAuthAccount exists for the user', async () => {
-    // Arrange
-    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(EXISTING_USER);
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      id: 'oauth-uuid-1',
-      userId: EXISTING_USER.id,
-      provider: 'google',
-    });
-
-    // Act
-    const result = await findUserById(EXISTING_USER.id);
-
-    // Assert
-    expect(result).toHaveProperty('googleConnected', true);
-  });
-
-  it('returns googleConnected: false when no OAuthAccount exists for the user', async () => {
-    // Arrange
-    (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue(EXISTING_USER);
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
-
-    // Act
-    const result = await findUserById(EXISTING_USER.id);
-
-    // Assert
-    expect(result).toHaveProperty('googleConnected', false);
   });
 });
 
@@ -683,16 +497,15 @@ describe('deleteAvatar', () => {
     (mockAvatarStorage.delete as jest.Mock).mockResolvedValue(undefined);
   });
 
-  it('happy path: deletes file, updates user to revert avatarUrl to googleAvatarUrl, clears avatarStoragePath', async () => {
+  it('happy path: deletes file, updates user to clear avatarUrl and avatarStoragePath', async () => {
     // Arrange
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
       ...EXISTING_USER,
       avatarStoragePath: 'custom-avatar.jpg',
-      googleAvatarUrl: 'https://lh3.googleusercontent.com/photo.jpg',
     });
     (mockPrisma.user.update as jest.Mock).mockResolvedValue({
       ...EXISTING_USER,
-      avatarUrl: 'https://lh3.googleusercontent.com/photo.jpg',
+      avatarUrl: null,
       avatarStoragePath: null,
     });
 
@@ -703,10 +516,10 @@ describe('deleteAvatar', () => {
     expect(mockAvatarStorage.delete).toHaveBeenCalledWith('custom-avatar.jpg');
     expect(mockPrisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ avatarStoragePath: null }),
+        data: { avatarStoragePath: null, avatarUrl: null },
       }),
     );
-    expect(result).toHaveProperty('avatarUrl');
+    expect(result).toHaveProperty('avatarUrl', null);
   });
 
   it('throws AppError 404 when avatarStoragePath is null (no custom avatar)', async () => {
@@ -725,7 +538,6 @@ describe('deleteAvatar', () => {
     (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
       ...EXISTING_USER,
       avatarStoragePath: 'avatar.jpg',
-      googleAvatarUrl: null,
     });
     (mockAvatarStorage.delete as jest.Mock).mockRejectedValueOnce(new Error('disk error'));
     (mockPrisma.user.update as jest.Mock).mockResolvedValue({
@@ -737,52 +549,5 @@ describe('deleteAvatar', () => {
     // Act & Assert — must not throw
     await expect(deleteAvatar(EXISTING_USER.id)).resolves.not.toThrow();
     expect(mockPrisma.user.update).toHaveBeenCalled();
-  });
-});
-
-describe('softDisconnectGoogle', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockRevokeToken.mockResolvedValue(undefined);
-  });
-
-  it('happy path: revokes token, deletes OAuthAccount row', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      ...EXISTING_OAUTH_ACCOUNT,
-      refreshTokenEnc: 'encrypted:google-refresh-token',
-    });
-    (mockPrisma.oAuthAccount.delete as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-
-    // Act
-    await softDisconnectGoogle(EXISTING_USER.id);
-
-    // Assert
-    expect(mockPrisma.oAuthAccount.delete).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: EXISTING_OAUTH_ACCOUNT.id } }),
-    );
-    expect(mockRevokeToken).toHaveBeenCalled();
-  });
-
-  it('throws AppError 404 when no OAuthAccount exists', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue(null);
-
-    // Act & Assert
-    await expect(softDisconnectGoogle(EXISTING_USER.id)).rejects.toMatchObject({ statusCode: 404 });
-  });
-
-  it('swallows revokeToken error (best-effort) and still deletes OAuthAccount', async () => {
-    // Arrange
-    (mockPrisma.oAuthAccount.findFirst as jest.Mock).mockResolvedValue({
-      ...EXISTING_OAUTH_ACCOUNT,
-      refreshTokenEnc: 'encrypted:google-refresh-token',
-    });
-    mockRevokeToken.mockRejectedValueOnce(new Error('revoke failed'));
-    (mockPrisma.oAuthAccount.delete as jest.Mock).mockResolvedValue(EXISTING_OAUTH_ACCOUNT);
-
-    // Act & Assert — must not throw
-    await expect(softDisconnectGoogle(EXISTING_USER.id)).resolves.not.toThrow();
-    expect(mockPrisma.oAuthAccount.delete).toHaveBeenCalled();
   });
 });

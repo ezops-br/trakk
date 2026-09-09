@@ -8,7 +8,6 @@ jest.mock('../lib/prisma', () => ({
     ticket: { findMany: jest.fn() },
     activityLog: { findMany: jest.fn() },
     project: { findMany: jest.fn() },
-    meeting: { findMany: jest.fn() },
   },
 }));
 
@@ -27,6 +26,7 @@ const MOCK_TICKET = {
   number: 1,
   title: 'Fix login bug',
   priority: 'HIGH',
+  dueDate: null,
   updatedAt: new Date('2026-06-10T10:00:00Z'),
   project: { key: 'TRAKK', name: 'Trakk' },
   statusColumn: { name: 'In Progress' },
@@ -77,25 +77,6 @@ const MOCK_PROJECT_SUMMARY = {
   totalCount: 3,
 };
 
-const MOCK_MEETING = {
-  id: 'meeting-uuid-1',
-  ticketId: 'ticket-uuid-1',
-  organizerId: USER_ID,
-  title: 'Sprint Planning',
-  startTime: new Date('2026-06-15T14:00:00Z'),
-  endTime: new Date('2026-06-15T15:00:00Z'),
-  meetLink: 'https://meet.google.com/abc-defg-hij',
-  googleEventId: 'google-event-1',
-  createdAt: new Date('2026-06-10T00:00:00Z'),
-  updatedAt: new Date('2026-06-10T00:00:00Z'),
-  organizer: { displayName: 'Alice', avatarUrl: null },
-  ticket: {
-    number: 1,
-    projectId: PROJECT_ID_1,
-    project: { key: 'TRAKK' },
-  },
-};
-
 beforeEach(() => {
   jest.clearAllMocks();
   // Re-apply $transaction mock after clearAllMocks (not used in this service,
@@ -109,7 +90,6 @@ describe('getDashboardData', () => {
     mockPrisma.ticket.findMany.mockResolvedValue([]);
     mockPrisma.activityLog.findMany.mockResolvedValue([]);
     mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
 
     // Act
     const result = await getDashboardData(USER_ID);
@@ -118,7 +98,6 @@ describe('getDashboardData', () => {
     expect(result.tickets).toEqual([]);
     expect(result.activities).toEqual([]);
     expect(result.projects).toEqual([]);
-    expect(result.meetings).toEqual([]);
   });
 
   it('returns tickets from ticket.findMany in the result', async () => {
@@ -129,7 +108,6 @@ describe('getDashboardData', () => {
     mockPrisma.ticket.findMany.mockResolvedValue([MOCK_TICKET]);
     mockPrisma.activityLog.findMany.mockResolvedValue([]);
     mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
 
     // Act
     const result = await getDashboardData(USER_ID);
@@ -137,6 +115,22 @@ describe('getDashboardData', () => {
     // Assert
     expect(result.tickets).toHaveLength(1);
     expect(result.tickets[0]).toEqual(MOCK_TICKET);
+  });
+
+  it('returns dueDate on each ticket', async () => {
+    // Arrange
+    mockPrisma.projectMember.findMany.mockResolvedValue([
+      { projectId: PROJECT_ID_1 },
+    ]);
+    mockPrisma.ticket.findMany.mockResolvedValue([MOCK_TICKET]);
+    mockPrisma.activityLog.findMany.mockResolvedValue([]);
+    mockPrisma.project.findMany.mockResolvedValue([]);
+
+    // Act
+    const result = await getDashboardData(USER_ID);
+
+    // Assert — wire shape is the string|null returned by Prisma, not a Date.
+    expect(result.tickets[0].dueDate).toBeNull();
   });
 
   it('returns activities from activityLog.findMany in the result', async () => {
@@ -147,7 +141,6 @@ describe('getDashboardData', () => {
     mockPrisma.ticket.findMany.mockResolvedValue([]);
     mockPrisma.activityLog.findMany.mockResolvedValue([MOCK_ACTIVITY]);
     mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
 
     // Act
     const result = await getDashboardData(USER_ID);
@@ -165,7 +158,6 @@ describe('getDashboardData', () => {
     mockPrisma.ticket.findMany.mockResolvedValue([]);
     mockPrisma.activityLog.findMany.mockResolvedValue([]);
     mockPrisma.project.findMany.mockResolvedValue([MOCK_PROJECT_RAW]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
 
     // Act
     const result = await getDashboardData(USER_ID);
@@ -173,24 +165,6 @@ describe('getDashboardData', () => {
     // Assert
     expect(result.projects).toHaveLength(1);
     expect(result.projects[0]).toEqual(MOCK_PROJECT_SUMMARY);
-  });
-
-  it('returns meetings from meeting.findMany in the result', async () => {
-    // Arrange
-    mockPrisma.projectMember.findMany.mockResolvedValue([
-      { projectId: PROJECT_ID_1 },
-    ]);
-    mockPrisma.ticket.findMany.mockResolvedValue([]);
-    mockPrisma.activityLog.findMany.mockResolvedValue([]);
-    mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([MOCK_MEETING]);
-
-    // Act
-    const result = await getDashboardData(USER_ID);
-
-    // Assert
-    expect(result.meetings).toHaveLength(1);
-    expect(result.meetings[0]).toEqual(MOCK_MEETING);
   });
 
   it('passes correct projectId IN filter to ticket query when user has projects', async () => {
@@ -202,7 +176,6 @@ describe('getDashboardData', () => {
     mockPrisma.ticket.findMany.mockResolvedValue([]);
     mockPrisma.activityLog.findMany.mockResolvedValue([]);
     mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
 
     // Act
     await getDashboardData(USER_ID);
@@ -213,40 +186,5 @@ describe('getDashboardData', () => {
       expect.arrayContaining([PROJECT_ID_1, PROJECT_ID_2]),
     );
     expect(ticketCallArgs.where.assigneeId).toBe(USER_ID);
-  });
-});
-
-// ─── archived ticket exclusion ────────────────────────────────────────────────
-
-describe('getDashboardData — archived tickets', () => {
-  it('excludes archived tickets from every ticket-bearing query', async () => {
-    // Arrange
-    mockPrisma.projectMember.findMany.mockResolvedValue([
-      { projectId: PROJECT_ID_1, role: 'MEMBER' },
-    ]);
-    mockPrisma.ticket.findMany.mockResolvedValue([]);
-    mockPrisma.activityLog.findMany.mockResolvedValue([]);
-    mockPrisma.project.findMany.mockResolvedValue([]);
-    mockPrisma.meeting.findMany.mockResolvedValue([]);
-
-    // Act
-    await getDashboardData(USER_ID);
-
-    // Assert — My Tickets
-    const ticketWhere = mockPrisma.ticket.findMany.mock.calls[0][0].where;
-    expect(ticketWhere.archivedAt).toBeNull();
-
-    // Recent Activity — nested ticket filter
-    const activityWhere = mockPrisma.activityLog.findMany.mock.calls[0][0].where;
-    expect(activityWhere.ticket.archivedAt).toBeNull();
-
-    // Upcoming Meetings — nested ticket filter
-    const meetingWhere = mockPrisma.meeting.findMany.mock.calls[0][0].where;
-    expect(meetingWhere.ticket.archivedAt).toBeNull();
-
-    // Project cards — nested tickets include drives openCount/totalCount
-    const projectArgs = mockPrisma.project.findMany.mock.calls[0][0];
-    const nestedTickets = projectArgs.include?.tickets ?? projectArgs.select?.tickets;
-    expect(nestedTickets.where.archivedAt).toBeNull();
   });
 });

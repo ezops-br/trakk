@@ -10,6 +10,7 @@ export interface UserTicketSummary {
   priority: string;
   statusColumnName: string;
   assigneeId: string | null;
+  dueDate: string | null;
   updatedAt: string;
 }
 
@@ -36,26 +37,10 @@ export interface UserProjectSummary {
   updatedAt: string;
 }
 
-export interface UserMeetingSummary {
-  id: string;
-  ticketId: string;
-  ticketNumber: number;
-  projectId: string;
-  projectKey: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  meetLink: string;
-  organizerId: string;
-  organizerName: string;
-  organizerAvatarUrl: string | null;
-}
-
 export interface DashboardData {
   tickets: unknown[];
   activities: unknown[];
   projects: UserProjectSummary[];
-  meetings: unknown[];
 }
 
 export async function getDashboardData(userId: string): Promise<DashboardData> {
@@ -65,17 +50,16 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   });
 
   if (memberships.length === 0) {
-    return { tickets: [], activities: [], projects: [], meetings: [] };
+    return { tickets: [], activities: [], projects: [] };
   }
 
   const projectIds = memberships.map((m) => m.projectId);
 
-  const [tickets, activities, rawProjects, meetings] = await Promise.all([
+  const [tickets, activities, rawProjects] = await Promise.all([
     prisma.ticket.findMany({
       where: {
         projectId: { in: projectIds },
         assigneeId: userId,
-        archivedAt: null,
         project: { archivedAt: null },
       },
       orderBy: { updatedAt: 'desc' },
@@ -87,6 +71,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
         title: true,
         priority: true,
         assigneeId: true,
+        dueDate: true,
         updatedAt: true,
         statusColumn: { select: { name: true } },
         project: { select: { key: true, name: true } },
@@ -94,13 +79,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     }),
 
     prisma.activityLog.findMany({
-      where: {
-        ticket: {
-          projectId: { in: projectIds },
-          archivedAt: null,
-          project: { archivedAt: null },
-        },
-      },
+      where: { ticket: { projectId: { in: projectIds }, project: { archivedAt: null } } },
       orderBy: { createdAt: 'desc' },
       take: 20,
       select: {
@@ -125,39 +104,8 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
       orderBy: { updatedAt: 'desc' },
       take: 5,
       include: {
-        // Archived tickets must not inflate openCount/totalCount on the cards.
-        tickets: { where: { archivedAt: null }, select: { id: true, statusColumnId: true } },
+        tickets: { select: { id: true, statusColumnId: true } },
         columns: { select: { id: true, position: true }, orderBy: { position: 'desc' } },
-      },
-    }),
-
-    prisma.meeting.findMany({
-      where: {
-        ticket: {
-          projectId: { in: projectIds },
-          archivedAt: null,
-          project: { archivedAt: null },
-        },
-        startTime: { gt: new Date() },
-      },
-      orderBy: { startTime: 'asc' },
-      take: 10,
-      select: {
-        id: true,
-        ticketId: true,
-        title: true,
-        startTime: true,
-        endTime: true,
-        meetLink: true,
-        organizerId: true,
-        organizer: { select: { displayName: true, avatarUrl: true } },
-        ticket: {
-          select: {
-            number: true,
-            projectId: true,
-            project: { select: { key: true } },
-          },
-        },
       },
     }),
   ]);
@@ -181,5 +129,5 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     };
   });
 
-  return { tickets, activities, projects, meetings };
+  return { tickets, activities, projects };
 }
