@@ -122,7 +122,6 @@ export async function searchTickets(
       LEFT JOIN users u ON t.assignee_id = u.id
       WHERE t.project_id = ANY(${scopedProjectIds})
         AND p.archived_at IS NULL
-        AND t.archived_at IS NULL
         AND p.key = ${projectKey}
         AND t.number = ${ticketNumber}
       LIMIT 1
@@ -146,7 +145,6 @@ export async function searchTickets(
     LEFT JOIN users u ON t.assignee_id = u.id
     WHERE t.project_id = ANY(${scopedProjectIds})
       AND p.archived_at IS NULL
-      AND t.archived_at IS NULL
       AND to_tsvector('english', t.title || ' ' || COALESCE(t.description, ''))
           @@ plainto_tsquery('english', ${q})
     ORDER BY ts_rank(

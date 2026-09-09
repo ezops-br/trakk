@@ -1,29 +1,43 @@
+# Local variant of docker-compose.prod.yml: same service shape (migrate +
+# backend + frontend) but images are BUILT from source here (dev
+# Dockerfiles, with hot-reload) instead of pulled from ECR, and a local `db`
+# service replaces RDS.
+#
+# No nginx: backend is exposed directly on host port 80 and frontend on 3000,
+# mirroring how a Daytona sandbox exposes this stack (see sandbox-setup.sh)
+# with no reverse proxy in front of it.
+#
+# Run (from the repo root):
+#   docker compose -f docker-compose.yml --env-file .env up -d --build
+#
+# --env-file is required (not just env_file: ./.env below) because the
+# frontend's NEXT_PUBLIC_* vars are read via ${...} substitution — see the
+# comment on the frontend service for why. Paths in this file (build context,
+# volumes, env_file) are relative to THIS file's directory (the repo root).
 services:
   db:
     image: postgres:16-alpine
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+    env_file: ./.env
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "pg_isready -U trakk"]
+      interval: 5s
+      timeout: 3s
       retries: 5
-      start_period: 10s
 
+  # All env comes from .env via env_file. We deliberately do NOT use
+  # `environment: FOO: ${FOO}` blocks on migrate/backend: those interpolate
+  # from the shell/--env-file at parse time and, because `environment`
+  # overrides `env_file`, would clobber the real .env values with blanks.
   migrate:
     build:
       context: ./backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     command: ["npx", "prisma", "migrate", "deploy"]
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
+    env_file: ./.env
     depends_on:
       db:
         condition: service_healthy
@@ -32,30 +46,16 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.prod
+      dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRY: ${JWT_EXPIRY:-7d}
-      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
-      CORS_ORIGIN: ${CORS_ORIGIN}
-      PORT: 4000
-      NODE_ENV: production
-      S3_BUCKET: ${S3_BUCKET}
-      S3_REGION: ${S3_REGION}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
-      S3_PUBLIC_URL: ${S3_PUBLIC_URL}
+    env_file: ./.env
     volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
       - upload-storage:/app/uploads
+    ports:
+      - "80:4000"
     depends_on:
-      db:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -68,15 +68,23 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.prod
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
+    # Unlike the prod image (where NEXT_PUBLIC_* is baked in at `docker build`
+    # time via --build-arg), the dev Dockerfile runs `next dev`, which reads
+    # NEXT_PUBLIC_* from the container's runtime env instead. So, unlike
+    # docker-compose.prod.yml's frontend, these must be set here — pulled from
+    # .env via ${...} substitution (hence --env-file .env above)
+    # rather than `env_file: .env` directly, to avoid also leaking
+    # backend-only secrets (JWT_SECRET, DB_PASSWORD, …) into this service.
     environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       INTERNAL_API_URL: ${INTERNAL_API_URL}
-      NODE_ENV: production
-      HOSTNAME: "0.0.0.0"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    ports:
+      - "3000:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -87,19 +95,6 @@ services:
       retries: 3
       start_period: 30s
 
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      frontend:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-
 volumes:
-  postgres_data:
+  db-data:
   upload-storage:

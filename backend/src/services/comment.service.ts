@@ -33,15 +33,6 @@ async function assertProjectNotArchived(projectId: string): Promise<void> {
   }
 }
 
-// Throws 403 if the ticket is archived (comment mutations are blocked on
-// archived tickets). Local to this file by convention — ticket.service.ts keeps
-// its own copy, which throws badRequest (400) instead. Both are intentional.
-function assertTicketNotArchived(ticket: { archivedAt: Date | null }): void {
-  if (ticket.archivedAt) {
-    throw forbidden('Cannot modify an archived ticket');
-  }
-}
-
 const USER_PREVIEW_SELECT = { id: true, displayName: true, avatarUrl: true } as const;
 
 // Finds a ticket by project + ticketNumber. Throws 404 if not found.
@@ -95,7 +86,6 @@ export async function createComment(
   }
   await assertProjectNotArchived(projectId);
   const ticket = await resolveTicket(projectId, ticketNumber);
-  assertTicketNotArchived(ticket);
 
   const comment = await prisma.$transaction(async (tx) => {
     const created = await tx.comment.create({
@@ -139,7 +129,6 @@ export async function updateComment(
   }
   await assertProjectNotArchived(projectId);
   const ticket = await resolveTicket(projectId, ticketNumber);
-  assertTicketNotArchived(ticket);
   const comment = await resolveComment(commentId, ticket.id);
 
   // Edit is author-only — no OWNER exception for updates
@@ -174,7 +163,6 @@ export async function deleteComment(
   }
   await assertProjectNotArchived(projectId);
   const ticket = await resolveTicket(projectId, ticketNumber);
-  assertTicketNotArchived(ticket);
   const comment = await resolveComment(commentId, ticket.id);
 
   // Authors can delete their own comments; OWNERs can delete any comment (moderation)

@@ -1,29 +1,40 @@
 'use client';
 
-import React, { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import React, { useState } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { apiClient, ApiError } from '@/lib/api-client';
+import type { User } from '@/lib/types';
 
-const ERROR_MESSAGES: Record<string, string> = {
-  access_denied:    "Sign-in was cancelled. Try again when you're ready.",
-  csrf_mismatch:    'Something went wrong. Please try again.',
-  state_mismatch:   'Invalid request. A security check failed — please try again.',
-  auth_failed:      'Authentication failed. Please try signing in again.',
-  account_conflict: 'Account conflict. This email is already registered with another account.',
-};
 const FALLBACK_ERROR = 'Sign-in failed. Please try again.';
-const GOOGLE_AUTH_URL = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/google`;
 
 function LoginContent() {
-  const searchParams = useSearchParams();
-  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const errorCode = searchParams.get('error');
-  const errorMessage = errorCode ? (ERROR_MESSAGES[errorCode] ?? FALLBACK_ERROR) : null;
-
-  function handleSignIn() {
-    setIsRedirecting(true);
-    window.location.href = GOOGLE_AUTH_URL;
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await apiClient.post<User>('/api/v1/auth/login', { email, password });
+      // Hard navigation, not router.push: the dashboard layout is a Server
+      // Component gated on the session cookie, and the App Router's client-side
+      // Router Cache can replay a stale pre-login redirect-to-/login response
+      // for up to 30s after a push, silently bouncing the user back with no
+      // visible error. A full navigation always hits the server fresh.
+      window.location.href = '/dashboard';
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message || FALLBACK_ERROR);
+      } else {
+        setError(FALLBACK_ERROR);
+      }
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -72,46 +83,65 @@ function LoginContent() {
               Issue tracking for teams that ship.
             </p>
 
-            {/* Google sign-in button — Google brand compliant */}
-            <button
-              type="button"
-              onClick={handleSignIn}
-              disabled={isRedirecting}
-              aria-label="Sign in with Google"
-              className="w-full h-10 flex items-center justify-center gap-3 rounded-badge border text-sm font-medium transition-shadow duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-trakk-teal focus-visible:ring-offset-2 disabled:pointer-events-none google-sign-in-btn"
-            >
-              {isRedirecting ? (
-                <>
-                  <Loader2
-                    size={16}
-                    className="animate-spin"
-                    aria-hidden="true"
-                  />
-                  Redirecting...
-                </>
-              ) : (
-                <>
-                  {/* Official Google G SVG — multicolor */}
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 18 18"
-                    aria-hidden="true"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z" fill="#4285F4" />
-                    <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z" fill="#34A853" />
-                    <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z" fill="#FBBC05" />
-                    <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58Z" fill="#EA4335" />
-                  </svg>
-                  Sign in with Google
-                </>
-              )}
-            </button>
+            {/* Email + password sign-in form */}
+            <form onSubmit={handleSubmit} className="w-full space-y-4" noValidate>
+              <div className="space-y-2 text-left">
+                <label
+                  htmlFor="email"
+                  className="block text-[13px] font-body font-medium text-trakk-text-secondary"
+                >
+                  Email
+                </label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
 
-            {/* Error callout — only when errorMessage is non-null */}
-            {errorMessage && (
+              <div className="space-y-2 text-left">
+                <label
+                  htmlFor="password"
+                  className="block text-[13px] font-body font-medium text-trakk-text-secondary"
+                >
+                  Password
+                </label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full h-10"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                    Signing in...
+                  </>
+                ) : (
+                  'Sign in'
+                )}
+              </Button>
+            </form>
+
+            {/* Error callout — only when error is non-null */}
+            {error && (
               <div
                 role="alert"
                 className="w-full mt-4 rounded-callout px-4 py-3 flex items-start gap-2 error-callout-enter"
@@ -126,7 +156,7 @@ function LoginContent() {
                   aria-hidden="true"
                 />
                 <p className="font-body font-normal text-[13px] text-trakk-text-secondary">
-                  {errorMessage}
+                  {error}
                 </p>
               </div>
             )}
@@ -165,9 +195,7 @@ export default function LoginPage() {
   return (
     <>
       <title>Sign in — Trakk</title>
-      <Suspense fallback={null}>
-        <LoginContent />
-      </Suspense>
+      <LoginContent />
     </>
   );
 }

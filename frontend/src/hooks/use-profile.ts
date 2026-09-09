@@ -14,7 +14,6 @@ interface UseProfileReturn {
   updateDisplayName: (name: string) => Promise<void>;
   uploadAvatar: (blob: Blob, filename: string) => Promise<void>;
   removeAvatar: () => Promise<void>;
-  disconnectGoogle: () => Promise<void>;
   deleteAccount: () => Promise<void>;
 }
 
@@ -99,11 +98,6 @@ export function useProfile(): UseProfileReturn {
     setProfile(updated);
   }, []);
 
-  const disconnectGoogle = useCallback(async () => {
-    await apiClient.post('/api/v1/auth/google/disconnect');
-    router.push('/login');
-  }, [router]);
-
   const deleteAccount = useCallback(async () => {
     await apiClient.del('/api/v1/auth/me');
     router.push('/login');
@@ -116,7 +110,6 @@ export function useProfile(): UseProfileReturn {
     updateDisplayName,
     uploadAvatar,
     removeAvatar,
-    disconnectGoogle,
     deleteAccount,
   };
 }

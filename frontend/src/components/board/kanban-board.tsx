@@ -17,6 +17,7 @@ import {
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import { ClipboardList, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 import type {
   BoardEvent,
   Role,
@@ -30,10 +31,13 @@ import { useLabels } from '@/hooks/use-labels';
 import { useProjectEvents } from '@/hooks/use-project-events';
 import { useBoardFilters } from '@/hooks/use-board-filters';
 import { applyBoardFilters } from '@/lib/filter-utils';
+import { apiClient } from '@/lib/api-client';
 import { UNASSIGNED_SENTINEL } from '@/lib/types';
 import { BoardColumn } from './board-column';
 import { BoardToolbar } from './board-toolbar';
 import { TicketCard } from './ticket-card';
+import { BulkActionBar } from './BulkActionBar';
+import { SelectionProvider } from '@/contexts/selection-context';
 import { CreateTicketDialog } from '@/components/tickets/create-ticket-dialog';
 import { TicketDetailSheet } from '@/components/tickets/ticket-detail-sheet';
 import { Button } from '@/components/ui/button';
@@ -43,6 +47,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 const SORT_ORDER_GAP = 1000;
 
 const DELETE_ZONE_ID = 'delete-zone';
+
+/**
+ * Returns true when a column name (case- and format-insensitive) refers to the
+ * "In Progress" column. Mirrors the backend matcher used by the
+ * unassigned-to-in-progress guard so the UI rejects the same moves the API
+ * would.
+ */
+function isInProgressColumnName(name: string) {
+  return (
+    name.toLowerCase().replace(/[_\s]+/g, ' ').trim() === 'in progress'
+  );
+}
 
 function DeleteZone({ visible }: { visible: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: DELETE_ZONE_ID });
@@ -56,7 +72,7 @@ function DeleteZone({ visible }: { visible: boolean }) {
           ? 'border-status-error bg-status-error/20 shadow-lg shadow-status-error/30 scale-110'
           : 'border-trakk-border bg-trakk-surface',
       ].join(' ')}
-      aria-label="Drop here to archive"
+      aria-label="Drop here to delete"
     >
       <Trash2
         size={22}
@@ -91,16 +107,39 @@ export function KanbanBoard({
     error: columnsError,
     refetch: refetchColumns,
   } = useColumns(projectId);
+
+  // useBoardFilters must come BEFORE useTickets because the ticket query
+  // takes a slice of its returned filters (dueDateFilter/From/To) as the
+  // server-side filter for the API call.
+  const {
+    filters,
+    setAssigneeIds,
+    setPriorities,
+    setLabelIds,
+    setSearch,
+    setDueDateFilter,
+    sort,
+    setSort,
+    order,
+    setOrder,
+    clearAll,
+    hasActiveFilters,
+  } = useBoardFilters();
+
   const {
     tickets,
     loading: ticketsLoading,
     error: ticketsError,
     createTicket,
-    archiveTicket,
+    deleteTicket,
     reorderTickets,
     setTickets,
     refetch: refetchTickets,
-  } = useTickets(projectId);
+  } = useTickets(projectId, {
+    dueDateFilter: filters.dueDateFilter,
+    dueDateFrom: filters.dueDateFrom,
+    dueDateTo: filters.dueDateTo,
+  });
 
   const {
     members,
@@ -112,15 +151,20 @@ export function KanbanBoard({
     loading: labelsLoading,
   } = useLabels(projectId);
 
-  const {
-    filters,
-    setAssigneeIds,
-    setPriorities,
-    setLabelIds,
-    setSearch,
-    clearAll,
-    hasActiveFilters,
-  } = useBoardFilters();
+  const isManualOrder = sort === 'sortOrder';
+  const sortBannerLabel: Record<typeof sort, string> = {
+    sortOrder: 'manual order',
+    priority: 'priority',
+    dueDate: 'due date',
+    createdAt: 'created date',
+    updatedAt: 'updated date',
+    number: 'ticket number',
+    assignee: 'assignee',
+  };
+  const returnToManualOrder = React.useCallback(() => {
+    setSort('sortOrder');
+    setOrder('asc');
+  }, [setSort, setOrder]);
 
   const filteredTickets = React.useMemo(
     () => applyBoardFilters(tickets, filters),
@@ -137,6 +181,11 @@ export function KanbanBoard({
   const [createDialogColumnId, setCreateDialogColumnId] = React.useState<
     string | undefined
   >(undefined);
+
+  // Mirror the latest `tickets` array in a ref so the SSE handler can read it
+  // without re-running on every render — same pattern as use-tickets.ts.
+  const ticketsRef = React.useRef<TicketWithRelations[]>([]);
+  ticketsRef.current = tickets;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -170,6 +219,24 @@ export function KanbanBoard({
           setTickets((prev) => prev.filter((t) => t.id !== ticketId));
           break;
         }
+        case 'ticket.overdue': {
+          const { ticketId } = event.payload as { ticketId: string };
+          const current = ticketsRef.current.find((t) => t.id === ticketId);
+          if (!current) break;
+          apiClient
+            .get<{ ticket: TicketWithRelations }>(
+              `/api/v1/projects/${projectId}/tickets/${current.number}`,
+            )
+            .then(({ ticket }) => {
+              setTickets((prev) =>
+                prev.map((t) => (t.id === ticket.id ? ticket : t)),
+              );
+            })
+            .catch(() => {
+              // Badge will appear on next reload — swallow network blips.
+            });
+          break;
+        }
         case 'ticket.reordered':
           refetchTickets();
           break;
@@ -185,11 +252,20 @@ export function KanbanBoard({
         case 'label.removed':
           refetchTickets();
           break;
+        case 'link.created':
+        case 'link.deleted':
+          // The Blocked chip on each ticket card derives from blockedBy,
+          // which the backend recomputes when links change. Cheapest path:
+          // refetch the full list so the chip appears/disappears without a
+          // manual reload. The detail sheet handles its own link updates
+          // via useLinks' hook-level refetch — keep that local.
+          void refetchTickets();
+          break;
         default:
           break;
       }
     },
-    [setTickets, refetchTickets, refetchColumns],
+    [setTickets, refetchTickets, refetchColumns, projectId],
   );
 
   useProjectEvents(projectId, handleEvent);
@@ -272,9 +348,9 @@ export function KanbanBoard({
     const moved = tickets.find((t) => t.id === activeId);
     if (!moved) return;
 
-    // Drop on the trash zone — archive the ticket (soft delete, recoverable).
+    // Drop on the delete zone — delete the ticket.
     if (overId === DELETE_ZONE_ID) {
-      void archiveTicket(moved.number);
+      void deleteTicket(moved.number);
       return;
     }
 
@@ -283,6 +359,12 @@ export function KanbanBoard({
     const targetColumnId = overTicket
       ? overTicket.statusColumnId
       : columns.find((c) => c.id === overId)?.id ?? moved.statusColumnId;
+
+    // When a named sort is active, in-column reorders are disabled. The only
+    // allowed mutation is a status-column change, so block same-column drops.
+    if (!isManualOrder && moved.statusColumnId === targetColumnId) {
+      return;
+    }
 
     // All other tickets in the target column, sorted by current sort order.
     const columnTickets = tickets
@@ -325,6 +407,17 @@ export function KanbanBoard({
     }
 
     const gap = prev && next ? next.sortOrder - prev.sortOrder : SORT_ORDER_GAP * 2;
+
+    // Guard: the backend refuses moves of unassigned tickets into the
+    // "In Progress" column. Mirror that here so the UI doesn't show partial
+    // optimistic progress that will be rejected server-side.
+    const targetColumn = columns.find((c) => c.id === targetColumnId);
+    if (targetColumn && isInProgressColumnName(targetColumn.name) && moved.assigneeId === null) {
+      toast.error(
+        `"${moved.title}" cannot move to In Progress — assign it first`,
+      );
+      return;
+    }
 
     let updates: ReorderUpdate[];
     if (gap < 1) {
@@ -390,56 +483,61 @@ export function KanbanBoard({
   // --- Render -------------------------------------------------------------
   if (loading) {
     return (
-      <div className="flex gap-4 overflow-x-auto">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="flex w-[300px] shrink-0 flex-col gap-3 rounded-panel bg-trakk-bg p-3"
-          >
-            <Skeleton className="h-6 w-32" />
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        ))}
-      </div>
+      <SelectionProvider>
+        <div className="flex gap-4 overflow-x-auto">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex w-[300px] shrink-0 flex-col gap-3 rounded-panel bg-trakk-bg p-3"
+            >
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ))}
+        </div>
+      </SelectionProvider>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-callout border border-[rgba(255,71,87,0.25)] bg-[rgba(255,71,87,0.06)] border-l-[3px] border-l-status-error px-6 py-5">
-        <div className="flex items-start gap-3">
-          <AlertTriangle
-            size={20}
-            strokeWidth={1.75}
-            className="mt-0.5 shrink-0 text-status-error"
-          />
-          <div className="flex flex-col gap-2">
-            <p className="font-body text-[15px] text-trakk-text-strong">
-              Couldn&apos;t load the board — {error}
-            </p>
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  refetchColumns();
-                  refetchTickets();
-                }}
-              >
-                Retry
-              </Button>
+      <SelectionProvider>
+        <div className="rounded-callout border border-[rgba(255,71,87,0.25)] bg-[rgba(255,71,87,0.06)] border-l-[3px] border-l-status-error px-6 py-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              size={20}
+              strokeWidth={1.75}
+              className="mt-0.5 shrink-0 text-status-error"
+            />
+            <div className="flex flex-col gap-2">
+              <p className="font-body text-[15px] text-trakk-text-strong">
+                Couldn&apos;t load the board — {error}
+              </p>
+              <div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    refetchColumns();
+                    refetchTickets();
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </SelectionProvider>
     );
   }
 
   const isEmpty = tickets.length === 0;
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <SelectionProvider>
+      <div className="flex h-full flex-col gap-4">
       <BoardToolbar
         projectId={projectId}
         filters={filters}
@@ -449,9 +547,29 @@ export function KanbanBoard({
         onPriorityChange={setPriorities}
         onLabelChange={setLabelIds}
         onSearchChange={setSearch}
+        onDueDateChange={setDueDateFilter}
+        onSortChange={setSort}
+        onOrderChange={setOrder}
+        sort={sort}
+        order={order}
         onClearAll={clearAll}
         isLoadingFilterData={membersLoading || labelsLoading}
       />
+      {!isManualOrder && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 rounded-callout border border-trakk-border bg-trakk-surface px-4 py-2.5"
+        >
+          <span className="font-body text-[13px] text-trakk-text-secondary">
+            Sorted by <span className="font-semibold text-trakk-text">{sortBannerLabel[sort]}</span>
+            {' \u2014 '}
+            drag to reorder disabled
+          </span>
+          <Button variant="ghost" size="sm" onClick={returnToManualOrder}>
+            Return to manual order
+          </Button>
+        </div>
+      )}
       {isEmpty ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 rounded-card border border-trakk-border bg-trakk-surface px-12 py-16 text-center">
@@ -504,6 +622,7 @@ export function KanbanBoard({
                 userRole={initialRole}
                 onAddTicket={handleAddTicket}
                 onTicketClick={openTicket}
+                hideDragHandle={!isManualOrder}
               />
             ))}
           </div>
@@ -544,6 +663,11 @@ export function KanbanBoard({
           projectIsArchived={projectIsArchived}
         />
       )}
-    </div>
+      </div>
+      <BulkActionBar
+        projectId={projectId}
+        userRole={initialRole}
+      />
+    </SelectionProvider>
   );
 }

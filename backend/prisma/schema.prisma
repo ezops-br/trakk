@@ -26,6 +26,12 @@ enum Priority {
   NONE
 }
 
+enum LinkType {
+  BLOCKS
+  RELATES_TO
+  DUPLICATES
+}
+
 // ─────────────────────────────────────────────
 // Models
 // ─────────────────────────────────────────────
@@ -33,12 +39,11 @@ enum Priority {
 model User {
   id          String   @id @default(uuid())
   email       String   @unique
-  googleId    String?  @unique @map("google_id")
+  passwordHash String  @map("password_hash")
   displayName String   @map("display_name")
   avatarUrl         String?  @map("avatar_url")
   themePreference   String   @default("light") @map("theme_preference")
   avatarStoragePath String?  @map("avatar_storage_path")
-  googleAvatarUrl   String?  @map("google_avatar_url")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -47,26 +52,10 @@ model User {
   reportedTickets   Ticket[]        @relation("TicketReporter")
   comments          Comment[]
   activityLogs      ActivityLog[]
-  organizedMeetings Meeting[]
-  oauthAccounts     OAuthAccount[]
+  linksCreated      TicketLink[]
+  uploadedAttachments TicketAttachment[]
 
   @@map("users")
-}
-
-model OAuthAccount {
-  id              String  @id @default(uuid())
-  userId          String  @map("user_id")
-  provider        String
-  providerId      String  @map("provider_id")
-  accessTokenEnc  String  @map("access_token_enc")
-  refreshTokenEnc String? @map("refresh_token_enc")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, provider])
-  @@unique([provider, providerId])
-  @@index([userId])
-  @@map("oauth_accounts")
 }
 
 model Project {
@@ -74,10 +63,8 @@ model Project {
   name        String
   key         String   @unique
   description String?
+  dueDate     DateTime? @map("due_date")
   archivedAt  DateTime? @map("archived_at")
-  // Monotonic per-project ticket number allocator. Never decremented, so a hard
-  // deleted ticket's number is never reused.
-  nextTicketNumber Int  @default(1) @map("next_ticket_number")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -85,8 +72,26 @@ model Project {
   columns StatusColumn[]
   tickets Ticket[]
   labels  Label[]
+  templates TicketTemplate[]
 
   @@map("projects")
+}
+
+model TicketTemplate {
+  id                  String    @id @default(uuid())
+  projectId           String    @map("project_id")
+  name                String
+  titleTemplate       String?   @map("title_template")
+  descriptionTemplate String?   @map("description_template")
+  defaultPriority     Priority? @map("default_priority")
+  defaultLabelIds     String[]  @map("default_label_ids")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("ticket_templates")
 }
 
 model ProjectMember {
@@ -128,10 +133,9 @@ model Ticket {
   priority       Priority @default(NONE)
   assigneeId     String?  @map("assignee_id")
   reporterId     String   @map("reporter_id")
+  dueDate        DateTime? @map("due_date")
   // Float supports fractional values for gap-based drag-and-drop reordering
   sortOrder      Float    @map("sort_order")
-  // Null = active; non-null timestamp = archived (soft hide, restorable).
-  archivedAt     DateTime? @map("archived_at")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -142,14 +146,16 @@ model Ticket {
   labels       TicketLabel[]
   comments     Comment[]
   activityLogs ActivityLog[]
-  meetings     Meeting[]
+  sourceLinks  TicketLink[] @relation("SourceLinks")
+  targetLinks  TicketLink[] @relation("TargetLinks")
+  attachments  TicketAttachment[]
 
   @@unique([projectId, number])
   @@index([projectId])
   @@index([assigneeId])
   @@index([statusColumnId])
   @@index([projectId, statusColumnId])
-  @@index([projectId, archivedAt])
+  @@index([projectId, dueDate])
   @@map("tickets")
 }
 
@@ -192,6 +198,23 @@ model Comment {
   @@map("comments")
 }
 
+model TicketLink {
+  id              String   @id @default(uuid())
+  sourceTicketId  String   @map("source_ticket_id")
+  targetTicketId  String   @map("target_ticket_id")
+  type            LinkType
+  createdByUserId String   @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  sourceTicket Ticket @relation("SourceLinks", fields: [sourceTicketId], references: [id], onDelete: Cascade)
+  targetTicket Ticket @relation("TargetLinks", fields: [targetTicketId], references: [id], onDelete: Cascade)
+  createdBy    User   @relation(fields: [createdByUserId], references: [id])
+
+  @@index([sourceTicketId])
+  @@index([targetTicketId])
+  @@map("ticket_links")
+}
+
 model ActivityLog {
   id        String   @id @default(uuid())
   ticketId  String   @map("ticket_id")
@@ -209,24 +232,22 @@ model ActivityLog {
   @@map("activity_logs")
 }
 
-model Meeting {
-  id            String   @id @default(uuid())
-  ticketId      String   @map("ticket_id")
-  organizerId   String   @map("organizer_id")
-  googleEventId String   @map("google_event_id")
-  meetLink      String   @map("meet_link")
-  title         String
-  startTime     DateTime @map("start_time")
-  endTime       DateTime @map("end_time")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+model TicketAttachment {
+  id           String   @id @default(uuid())
+  ticketId     String   @map("ticket_id")
+  uploaderId   String   @map("uploader_id")
+  /// Bytes payload. Nullable because legacy rows from the pre-bytea S3 era (PR #39)
+  /// have bytes = NULL; the raw route returns 404 for those rows. No backfill — by
+  /// design, those rows are unrecoverable.
+  bytes        Bytes?   @map("bytes")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  organizer User   @relation(fields: [organizerId], references: [id])
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploader User   @relation(fields: [uploaderId], references: [id])
 
   @@index([ticketId])
-  @@index([ticketId, startTime(sort: Asc)])
-  @@index([organizerId, startTime(sort: Asc)])
-  @@unique([googleEventId])
-  @@map("meetings")
+  @@map("ticket_attachments")
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act } from 'react';
 import { BoardToolbar } from '@/components/board/board-toolbar';
 import type { BoardFilters, MemberWithUser, Label } from '@/lib/types';
 import { UNASSIGNED_SENTINEL } from '@/lib/types';
@@ -36,6 +37,19 @@ const MOCK_LABELS: Label[] = [
   { id: 'label-2', projectId: 'proj-1', name: 'Feature', color: '#00ff00' },
 ];
 
+/**
+ * Radix DropdownMenu listens to a full pointerdown -> pointerup -> click
+ * sequence on its trigger before opening the menu (which then renders into a
+ * portal). Synthesize that and flush React effects so the menu items appear.
+ */
+function openDropdown(trigger: HTMLElement) {
+  act(() => {
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: 'mouse' });
+    fireEvent.click(trigger);
+  });
+}
+
 const DEFAULT_PROPS = {
   projectId: 'proj-1',
   filters: EMPTY_FILTERS,
@@ -45,6 +59,11 @@ const DEFAULT_PROPS = {
   onPriorityChange: vi.fn(),
   onLabelChange: vi.fn(),
   onSearchChange: vi.fn(),
+  onDueDateChange: vi.fn(),
+  onSortChange: vi.fn(),
+  onOrderChange: vi.fn(),
+  sort: 'sortOrder' as const,
+  order: 'asc' as const,
   onClearAll: vi.fn(),
   isLoadingFilterData: false,
 };
@@ -139,5 +158,158 @@ describe('BoardToolbar', () => {
     // Assert — assignee button should be disabled
     const assigneeBtn = screen.getByRole('button', { name: /assignee/i });
     expect(assigneeBtn).toBeDisabled();
+  });
+
+  it('renders the Sort dropdown trigger', () => {
+    // Arrange + Act
+    render(<BoardToolbar {...DEFAULT_PROPS} />);
+
+    // Assert
+    expect(screen.getByRole('button', { name: /sort/i })).toBeInTheDocument();
+  });
+
+  it('shows all 7 sort options by label when the dropdown is open', () => {
+    // Arrange
+    render(<BoardToolbar {...DEFAULT_PROPS} />);
+
+    // Act — open the dropdown via the trigger
+    const trigger = screen.getByTestId('board-toolbar-sort-trigger');
+    openDropdown(trigger);
+
+    // Assert — all 7 sort options are present (rendered into a Radix portal)
+    waitFor(() => {
+      expect(screen.getByText('Manual order')).toBeInTheDocument();
+      expect(screen.getByText('Priority')).toBeInTheDocument();
+      expect(screen.getByText('Due date')).toBeInTheDocument();
+      expect(screen.getByText('Created date')).toBeInTheDocument();
+      expect(screen.getByText('Updated date')).toBeInTheDocument();
+      expect(screen.getByText('Ticket number')).toBeInTheDocument();
+      expect(screen.getByText('Assignee')).toBeInTheDocument();
+    });
+  });
+
+  it('calls onSortChange("priority") when the Priority option is clicked', () => {
+    // Arrange
+    const onSortChange = vi.fn();
+    render(<BoardToolbar {...DEFAULT_PROPS} onSortChange={onSortChange} />);
+
+    // Act — open the dropdown, then click Priority
+    const trigger = screen.getByTestId('board-toolbar-sort-trigger');
+    openDropdown(trigger);
+
+    waitFor(() => {
+      const priorityOption = screen.getByText('Priority');
+      fireEvent.click(priorityOption);
+    });
+
+    // Assert
+    waitFor(() => {
+      expect(onSortChange).toHaveBeenCalledWith('priority');
+    });
+  });
+
+  it('shows "asc" by default on the order toggle', () => {
+    // Arrange + Act
+    render(<BoardToolbar {...DEFAULT_PROPS} />);
+
+    // Assert
+    expect(screen.getByTestId('board-toolbar-order-toggle')).toHaveTextContent('asc');
+  });
+
+  it('shows "desc" on the order toggle when order="desc"', () => {
+    // Arrange + Act
+    render(<BoardToolbar {...DEFAULT_PROPS} order="desc" />);
+
+    // Assert
+    expect(screen.getByTestId('board-toolbar-order-toggle')).toHaveTextContent('desc');
+  });
+
+  it('calls onOrderChange("desc") when order is "asc" and toggle is clicked', () => {
+    // Arrange — toggle is disabled when sort is the default "sortOrder",
+    // so use a named sort to make the toggle clickable.
+    const onOrderChange = vi.fn();
+    render(
+      <BoardToolbar
+        {...DEFAULT_PROPS}
+        sort="priority"
+        onOrderChange={onOrderChange}
+      />,
+    );
+
+    // Act
+    const toggle = screen.getByTestId('board-toolbar-order-toggle');
+    fireEvent.click(toggle);
+
+    // Assert
+    expect(onOrderChange).toHaveBeenCalledWith('desc');
+  });
+
+  // --- Due date control --------------------------------------------------
+
+  it('renders an inactive Due date trigger when no due-date filter is set', () => {
+    // Arrange + Act
+    render(<BoardToolbar {...DEFAULT_PROPS} />);
+
+    // Assert — trigger exists, no enum suffix, no badge
+    const trigger = screen.getByTestId('board-toolbar-due-date-trigger');
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveTextContent('Due date');
+    expect(screen.queryByText(/^Due: Overdue$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Due: Due today$/)).not.toBeInTheDocument();
+  });
+
+  it('renders "Overdue" trigger label and badge when dueDateFilter is "overdue"', () => {
+    // Arrange
+    const filtersWithOverdue: BoardFilters = { ...EMPTY_FILTERS, dueDateFilter: 'overdue' };
+    render(<BoardToolbar {...DEFAULT_PROPS} filters={filtersWithOverdue} />);
+
+    // Assert — trigger text and badge both reflect "Overdue"
+    expect(screen.getByTestId('board-toolbar-due-date-trigger')).toHaveTextContent('Due date: Overdue');
+    expect(screen.getByText(/^Due: Overdue$/)).toBeInTheDocument();
+  });
+
+  it('calls onDueDateChange() (no args) when the Due date badge remove button is clicked', () => {
+    // Arrange
+    const onDueDateChange = vi.fn();
+    const filtersWithOverdue: BoardFilters = { ...EMPTY_FILTERS, dueDateFilter: 'overdue' };
+    render(
+      <BoardToolbar
+        {...DEFAULT_PROPS}
+        filters={filtersWithOverdue}
+        onDueDateChange={onDueDateChange}
+      />,
+    );
+
+    // Act
+    const removeBtn = screen.getByRole('button', { name: /remove due-date filter overdue/i });
+    fireEvent.click(removeBtn);
+
+    // Assert — single call with no arguments = clear
+    expect(onDueDateChange).toHaveBeenCalledOnce();
+    expect(onDueDateChange.mock.calls[0]).toEqual([]);
+  });
+
+  it('calls onDueDateChange(undefined, from, to) when Custom range Apply is clicked', async () => {
+    // Arrange
+    const onDueDateChange = vi.fn();
+    render(<BoardToolbar {...DEFAULT_PROPS} onDueDateChange={onDueDateChange} />);
+
+    // Act — open the popover, fill both fields, click Apply
+    const trigger = screen.getByTestId('board-toolbar-due-date-trigger');
+    fireEvent.click(trigger);
+
+    const fromInput = await screen.findByTestId('due-date-from');
+    const toInput = await screen.findByTestId('due-date-to');
+    fireEvent.change(fromInput, { target: { value: '2026-07-20' } });
+    fireEvent.change(toInput, { target: { value: '2026-07-25' } });
+
+    const applyBtn = screen.getByTestId('due-date-apply');
+    fireEvent.click(applyBtn);
+
+    // Assert — single call: (undefined, '2026-07-20', '2026-07-25')
+    expect(onDueDateChange).toHaveBeenCalledOnce();
+    expect(onDueDateChange.mock.calls[0][0]).toBeUndefined();
+    expect(onDueDateChange.mock.calls[0][1]).toBe('2026-07-20');
+    expect(onDueDateChange.mock.calls[0][2]).toBe('2026-07-25');
   });
 });

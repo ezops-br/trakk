@@ -66,9 +66,7 @@ export function Sidebar() {
 
   React.useEffect(() => {
     fetchProjects();
-    const handler = () => {
-      fetchProjects();
-    };
+    const handler = () => fetchProjects();
     window.addEventListener('project-list-changed', handler);
     return () => window.removeEventListener('project-list-changed', handler);
   }, [fetchProjects]);

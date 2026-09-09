@@ -1,8 +1,6 @@
 import { Prisma, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { forbidden, notFound, conflict } from '../lib/app-error';
-import { getRefreshedAccessToken } from './google-oauth.service';
-import { deleteCalendarEvent } from './google-calendar.service';
 
 // Resolves the authenticated user's role on a project.
 // Throws 403 if the user is not a member of the project.
@@ -53,7 +51,7 @@ export async function getProjectById(projectId: string, userId: string) {
 }
 
 export async function createProject(
-  data: { name: string; key: string; description?: string | null },
+  data: { name: string; key: string; description?: string | null; dueDate?: Date | null },
   userId: string,
 ) {
   try {
@@ -63,6 +61,7 @@ export async function createProject(
           name: data.name,
           key: data.key,
           description: data.description ?? null,
+          dueDate: data.dueDate ?? null,
         },
       });
 
@@ -76,10 +75,11 @@ export async function createProject(
 
       await tx.statusColumn.createMany({
         data: [
-          { projectId: created.id, name: 'To Do', position: 0 },
-          { projectId: created.id, name: 'In Progress', position: 1 },
-          { projectId: created.id, name: 'In Review', position: 2 },
-          { projectId: created.id, name: 'Done', position: 3 },
+          { projectId: created.id, name: 'backlog', position: 0 },
+          { projectId: created.id, name: 'todo', position: 1 },
+          { projectId: created.id, name: 'in_progress', position: 2 },
+          { projectId: created.id, name: 'review', position: 3 },
+          { projectId: created.id, name: 'done', position: 4 },
         ],
       });
 
@@ -98,7 +98,7 @@ export async function createProject(
 export async function updateProject(
   projectId: string,
   userId: string,
-  fields: { name?: string; key?: string; description?: string | null },
+  fields: { name?: string; key?: string; description?: string | null; dueDate?: Date | null },
 ) {
   const role = await getUserProjectRole(userId, projectId);
   if (role !== 'OWNER') {
@@ -114,6 +114,9 @@ export async function updateProject(
   }
   if (fields.description !== undefined) {
     data.description = fields.description;
+  }
+  if (fields.dueDate !== undefined) {
+    data.dueDate = fields.dueDate;
   }
 
   try {
@@ -139,40 +142,6 @@ export async function deleteProject(projectId: string, userId: string): Promise<
   const role = await getUserProjectRole(userId, projectId);
   if (role !== 'OWNER') {
     throw forbidden();
-  }
-
-  const meetings = await prisma.meeting.findMany({
-    where: { ticket: { projectId } },
-    select: { id: true, googleEventId: true, organizerId: true },
-  });
-
-  // Best-effort Google Calendar cleanup — never block project deletion on it.
-  try {
-    for (const meeting of meetings) {
-      if (!meeting.googleEventId) {
-        continue;
-      }
-      try {
-        const oauthAccount = await prisma.oAuthAccount.findFirst({
-          where: { userId: meeting.organizerId, provider: 'google' },
-        });
-        if (!oauthAccount?.refreshTokenEnc) {
-          continue;
-        }
-        const accessToken = await getRefreshedAccessToken(oauthAccount.refreshTokenEnc);
-        await deleteCalendarEvent(accessToken, meeting.googleEventId);
-      } catch (err) {
-        console.warn(
-          `Failed to delete Google Calendar event for meeting ${meeting.id}:`,
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-  } catch (err) {
-    console.warn(
-      'Google Calendar cleanup failed during project deletion:',
-      err instanceof Error ? err.message : String(err),
-    );
   }
 
   await prisma.project.delete({ where: { id: projectId } });

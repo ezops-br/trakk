@@ -22,10 +22,6 @@ const ACTION_LABELS: Record<string, string> = {
   assignee_changed: 'changed assignee on',
   label_assigned: 'added label to',
   label_removed: 'removed label from',
-  meeting_scheduled: 'scheduled a meeting on',
-  meeting_updated: 'updated meeting on',
-  meeting_cancelled: 'cancelled meeting on',
-  meet_started: 'started Quick Meet on',
 };
 
 function getActionLabel(action: string): string {

@@ -175,3 +175,70 @@ describe('applyProjectFilters', () => {
     expect(result[0].id).toBe('proj-1');
   });
 });
+
+// ─── matchesDueFilter ─────────────────────────────────────────────────────────
+
+import { matchesDueFilter } from '@/lib/dashboard-filter-utils';
+
+describe('matchesDueFilter', () => {
+  // Pin a deterministic "now": Thursday 2026-06-11 12:00:00 UTC.
+  // Thu = 4 in getUTCDay(). Next Monday = 2026-06-15.
+  const NOW = new Date('2026-06-11T12:00:00Z');
+
+  it("'all' returns true for a ticket with a dueDate", () => {
+    const ticket = { dueDate: '2026-06-12T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'all', NOW)).toBe(true);
+  });
+
+  it("'all' returns true for a ticket without a dueDate", () => {
+    const ticket = { dueDate: null };
+    expect(matchesDueFilter(ticket, 'all', NOW)).toBe(true);
+  });
+
+  it("'overdue' excludes tickets with a null dueDate", () => {
+    const ticket = { dueDate: null };
+    expect(matchesDueFilter(ticket, 'overdue', NOW)).toBe(false);
+  });
+
+  it("'overdue' returns true for a dueDate earlier than today's UTC midnight", () => {
+    const ticket = { dueDate: '2026-06-10T23:59:59.000Z' };
+    expect(matchesDueFilter(ticket, 'overdue', NOW)).toBe(true);
+  });
+
+  it("'overdue' returns false for a dueDate equal to today's UTC midnight", () => {
+    const ticket = { dueDate: '2026-06-11T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'overdue', NOW)).toBe(false);
+  });
+
+  it("'today' returns true at the lower boundary (today's UTC midnight)", () => {
+    const ticket = { dueDate: '2026-06-11T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'today', NOW)).toBe(true);
+  });
+
+  it("'today' returns false at the upper boundary (tomorrow's UTC midnight)", () => {
+    const ticket = { dueDate: '2026-06-12T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'today', NOW)).toBe(false);
+  });
+
+  it("'today' returns false for a dueDate 30 days in the future", () => {
+    const ticket = { dueDate: '2026-07-11T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'today', NOW)).toBe(false);
+  });
+
+  it("'this_week' matches a dueDate 3 days in the future", () => {
+    // Sunday 2026-06-14 is 3 days after Thursday 2026-06-11 — within the week.
+    const ticket = { dueDate: '2026-06-14T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'this_week', NOW)).toBe(true);
+  });
+
+  it("'this_week' excludes a dueDate 30 days in the future", () => {
+    const ticket = { dueDate: '2026-07-11T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'this_week', NOW)).toBe(false);
+  });
+
+  it("'this_week' excludes a dueDate before 'now'", () => {
+    // A dueDate earlier than the pinned NOW must not be included.
+    const ticket = { dueDate: '2026-06-10T00:00:00.000Z' };
+    expect(matchesDueFilter(ticket, 'this_week', NOW)).toBe(false);
+  });
+});

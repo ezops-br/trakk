@@ -7,8 +7,10 @@ import { AlertTriangle, Archive, ArchiveRestore, Lock } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { ProjectWithRole, UpdateProjectInput } from '@/lib/types';
 import { useAuth } from '@/hooks/use-auth';
+import { useLabels } from '@/hooks/use-labels';
 import { MembersSection } from '@/components/projects/MembersSection';
 import { LabelsSection } from '@/components/projects/LabelsSection';
+import { TemplatesSection } from '@/components/projects/TemplatesSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,6 +30,7 @@ const updateProjectSchema = z.object({
     .string()
     .regex(/^[A-Z0-9]{2,10}$/, 'Key must be 2-10 uppercase letters and digits'),
   description: z.string().max(500).optional().nullable(),
+  dueDate: z.string().nullable().optional(),
 });
 
 const LABEL_CLASS =
@@ -45,6 +48,8 @@ export default function ProjectSettingsPage({ params }: SettingsPageProps) {
   const [project, setProject] = React.useState<ProjectWithRole | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const { labels } = useLabels(projectId);
 
   React.useEffect(() => {
     let active = true;
@@ -126,6 +131,7 @@ export default function ProjectSettingsPage({ params }: SettingsPageProps) {
           onProjectChange={setProject}
           router={router}
           currentUserId={user?.id ?? ''}
+          labels={labels}
         />
       )}
     </div>
@@ -191,16 +197,21 @@ function OwnerSettings({
   onProjectChange,
   router,
   currentUserId,
+  labels,
 }: {
   project: ProjectWithRole;
   onProjectChange: (p: ProjectWithRole) => void;
   router: ReturnType<typeof useRouter>;
   currentUserId: string;
+  labels: ReturnType<typeof useLabels>['labels'];
 }) {
   const [name, setName] = React.useState(project.name);
   const [key, setKey] = React.useState(project.key);
   const [description, setDescription] = React.useState(
     project.description ?? '',
+  );
+  const [dueDate, setDueDate] = React.useState(
+    project.dueDate ? project.dueDate.slice(0, 10) : '',
   );
   const [saving, setSaving] = React.useState(false);
   const [fieldErrors, setFieldErrors] = React.useState<{
@@ -228,6 +239,7 @@ function OwnerSettings({
       name,
       key,
       description: description.trim() === '' ? null : description,
+      dueDate: dueDate === '' ? null : `${dueDate}T00:00:00.000Z`,
     });
 
     if (!parsed.success) {
@@ -353,6 +365,18 @@ function OwnerSettings({
           />
         </div>
 
+        <div className="flex flex-col gap-2">
+          <label htmlFor="due-date" className={LABEL_CLASS}>
+            Due date
+          </label>
+          <Input
+            id="due-date"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+          />
+        </div>
+
         {saveError && (
           <p className="font-body text-[13px] text-status-error">{saveError}</p>
         )}
@@ -379,6 +403,12 @@ function OwnerSettings({
         projectName={project.name}
         currentUserId={currentUserId}
         currentUserRole={project.role}
+      />
+
+      <TemplatesSection
+        projectId={project.id}
+        currentUserRole={project.role}
+        labels={labels}
       />
 
       {/* Archive section */}
@@ -416,8 +446,8 @@ function OwnerSettings({
             Delete this project
           </h2>
           <p className="font-body text-[13px] text-trakk-text-secondary leading-relaxed">
-            This permanently deletes the project and all of its tickets,
-            comments, and meetings. This action cannot be undone. Type the
+            This permanently deletes the project and all of its tickets and
+            comments. This action cannot be undone. Type the
             project key{' '}
             <span className="font-mono text-trakk-text">{project.key}</span> to
             confirm.

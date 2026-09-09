@@ -17,7 +17,6 @@ jest.mock('../services/dashboard.service', () => ({
     tickets: [],
     activities: [],
     projects: [],
-    meetings: [],
   }),
 }), { virtual: true });
 
@@ -66,7 +65,6 @@ beforeEach(() => {
     tickets: [],
     activities: [],
     projects: [],
-    meetings: [],
   });
 });
 
@@ -85,11 +83,9 @@ describe('GET /api/v1/dashboard', () => {
     expect(res.body).toHaveProperty('tickets');
     expect(res.body).toHaveProperty('activities');
     expect(res.body).toHaveProperty('projects');
-    expect(res.body).toHaveProperty('meetings');
     expect(Array.isArray(res.body.tickets)).toBe(true);
     expect(Array.isArray(res.body.activities)).toBe(true);
     expect(Array.isArray(res.body.projects)).toBe(true);
-    expect(Array.isArray(res.body.meetings)).toBe(true);
   });
 
   it('returns 401 for an unauthenticated request (no cookie)', async () => {

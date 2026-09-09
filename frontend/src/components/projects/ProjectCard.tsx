@@ -9,6 +9,20 @@ interface ProjectCardProps {
   project: ProjectWithRole;
 }
 
+const dueDateFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeZone: 'UTC',
+});
+
+function parseIsoDateUtc(iso: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
 export function ProjectCard({ project }: ProjectCardProps) {
   return (
     <div className="group relative rounded-card bg-trakk-surface border border-trakk-border shadow-card transition-all duration-200 ease-ace-enter hover:border-[var(--trakk-teal-border)] hover:shadow-glow-subtle">
@@ -28,6 +42,16 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <p className="mt-2 font-body text-[13px] text-trakk-text-secondary leading-relaxed line-clamp-2 min-h-[2.5em]">
           {project.description || 'No description'}
         </p>
+
+        {project.dueDate && (() => {
+          const parsed = parseIsoDateUtc(project.dueDate);
+          if (!parsed) return null;
+          return (
+            <p className="mt-1 font-body text-[12px] text-trakk-text-secondary">
+              Due {dueDateFormatter.format(parsed)}
+            </p>
+          );
+        })()}
 
         <div className="mt-4 flex items-center gap-4 font-mono text-[10px] tracking-[2px] uppercase text-trakk-text-secondary">
           <span className="inline-flex items-center gap-1.5">

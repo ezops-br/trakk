@@ -48,15 +48,6 @@ interface MockProjectSummary {
   totalCount: number;
 }
 
-interface MockMeetingSummary {
-  id: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  meetLink: string;
-  ticket: { number: number; projectId: string; project: { key: string } };
-}
-
 const MOCK_TICKET: MockUserTicketSummary = {
   id: 'ticket-uuid-1',
   number: 1,
@@ -84,20 +75,10 @@ const MOCK_PROJECT: MockProjectSummary = {
   totalCount: 10,
 };
 
-const MOCK_MEETING: MockMeetingSummary = {
-  id: 'meeting-uuid-1',
-  title: 'Sprint Planning',
-  startTime: '2026-06-15T14:00:00Z',
-  endTime: '2026-06-15T15:00:00Z',
-  meetLink: 'https://meet.google.com/abc-defg-hij',
-  ticket: { number: 1, projectId: 'proj-uuid-1', project: { key: 'TRAKK' } },
-};
-
 const MOCK_DASHBOARD_RESPONSE = {
   tickets: [MOCK_TICKET],
   activities: [MOCK_ACTIVITY],
   projects: [MOCK_PROJECT],
-  meetings: [MOCK_MEETING],
 };
 
 beforeEach(() => {
@@ -131,8 +112,6 @@ describe('useDashboard', () => {
     expect(result.current.activities[0].action).toBe('status_changed');
     expect(result.current.projects).toHaveLength(1);
     expect(result.current.projects[0].name).toBe('Trakk');
-    expect(result.current.meetings).toHaveLength(1);
-    expect(result.current.meetings[0].title).toBe('Sprint Planning');
     expect(result.current.error).toBeNull();
   });
 
@@ -149,6 +128,5 @@ describe('useDashboard', () => {
     expect(result.current.tickets).toEqual([]);
     expect(result.current.activities).toEqual([]);
     expect(result.current.projects).toEqual([]);
-    expect(result.current.meetings).toEqual([]);
   });
 });

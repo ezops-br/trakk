@@ -1,27 +1,42 @@
 import React from 'react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-// Mock next/navigation before importing the component
-const mockGet = vi.fn();
-
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => ({ get: mockGet }),
-}));
-
-// window.location.href assignment must be writable
-Object.defineProperty(window, 'location', {
-  value: { href: '' },
-  writable: true,
+// Mock the API client
+vi.mock('@/lib/api-client', () => {
+  class ApiError extends Error {
+    status: number;
+    details?: string;
+    constructor(status: number, message: string, details?: string) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+      this.details = details;
+    }
+  }
+  return {
+    ApiError,
+    apiClient: {
+      post: vi.fn(),
+    },
+  };
 });
 
 import LoginPage from './page';
+import { apiClient, ApiError } from '@/lib/api-client';
 
-describe('LoginPage — redesign', () => {
+const mockApiPost = apiClient.post as ReturnType<typeof vi.fn>;
+
+describe('LoginPage — email/password form', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGet.mockReturnValue(null); // default: no error query param
-    window.location.href = '';
+    // Login navigates via a hard `window.location.href` assignment, not
+    // router.push (see page.tsx) — jsdom doesn't implement real navigation,
+    // so replace `location` with a writable stand-in to observe it.
+    Object.defineProperty(window, 'location', {
+      value: { href: '' },
+      writable: true,
+    });
   });
 
   // --- Brand & copy ---
@@ -45,9 +60,6 @@ describe('LoginPage — redesign', () => {
   it('renders a <title> element containing "Sign in" and "Trakk"', () => {
     const { container } = render(<LoginPage />);
 
-    // The spec requires an inline <title> in JSX.
-    // In jsdom, React renders <title> into the component tree (not hoisted to <head>).
-    // We query both locations to handle either behaviour.
     const titleInTree = container.querySelector('title');
     const titleInHead = document.querySelector('title');
     const titleEl = titleInTree ?? titleInHead;
@@ -66,144 +78,108 @@ describe('LoginPage — redesign', () => {
     expect(heading.className).toMatch(/text-transparent/);
   });
 
-  // --- Sign-in button ---
+  // --- Form fields ---
 
-  it('renders a button with aria-label "Sign in with Google"', () => {
+  it('renders email and password inputs and a submit button', () => {
     render(<LoginPage />);
 
-    expect(
-      screen.getByRole('button', { name: /sign in with google/i })
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
-  it('clicking the sign-in button sets window.location.href to the Google OAuth URL', () => {
-    render(<LoginPage />);
+  // --- Successful submit ---
 
-    const button = screen.getByRole('button', { name: /sign in with google/i });
-    fireEvent.click(button);
-
-    expect(window.location.href).toMatch(/\/api\/v1\/auth\/google/);
-  });
-
-  it('Google SVG icon inside button has aria-hidden="true"', () => {
-    render(<LoginPage />);
-
-    const button = screen.getByRole('button', { name: /sign in with google/i });
-    const svg = button.querySelector('svg[aria-hidden="true"]');
-    expect(svg).toBeInTheDocument();
-  });
-
-  // --- Loading state ---
-
-  it('button shows "Redirecting..." and is disabled after click', async () => {
-    render(<LoginPage />);
-
-    const button = screen.getByRole('button', { name: /sign in with google/i });
-
-    await act(async () => {
-      fireEvent.click(button);
+  it('submits email/password to the API client and navigates to /dashboard on success', async () => {
+    mockApiPost.mockResolvedValue({
+      id: 'user-1',
+      email: 'alice@test.com',
+      displayName: 'Alice',
+      avatarUrl: null,
+      themePreference: 'light',
     });
 
-    // After click: button text changes to "Redirecting..." and is disabled.
-    // The button retains aria-label="Sign in with Google" which overrides accessible name,
-    // so we check the visible text via textContent and disabled state directly.
-    expect(button.textContent).toMatch(/redirecting/i);
+    render(<LoginPage />);
+
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'alice@test.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'password123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith('/api/v1/auth/login', {
+        email: 'alice@test.com',
+        password: 'password123',
+      });
+    });
+
+    await waitFor(() => {
+      expect(window.location.href).toBe('/dashboard');
+    });
+  });
+
+  it('shows a loading state and disables the submit button while submitting', async () => {
+    let resolvePost: (value: unknown) => void = () => {};
+    mockApiPost.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePost = resolve;
+      })
+    );
+
+    render(<LoginPage />);
+
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'alice@test.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'password123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    const button = await screen.findByRole('button', { name: /signing in/i });
     expect(button).toBeDisabled();
+
+    resolvePost({
+      id: 'user-1',
+      email: 'alice@test.com',
+      displayName: 'Alice',
+      avatarUrl: null,
+      themePreference: 'light',
+    });
+
+    await waitFor(() => expect(window.location.href).toBe('/dashboard'));
   });
 
-  // --- Error callout: no error ---
+  // --- Failed submit ---
 
-  it('does NOT show a role="alert" when no error param is present', () => {
-    mockGet.mockReturnValue(null);
-
-    render(<LoginPage />);
-
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  // --- Error callout: known codes ---
-
-  it('shows callout with "Sign-in was cancelled" for ?error=access_denied', () => {
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'access_denied' : null
+  it('shows an inline error and does not navigate on 401 failure', async () => {
+    mockApiPost.mockRejectedValue(
+      new ApiError(401, 'Invalid email or password')
     );
 
     render(<LoginPage />);
 
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/sign-in was cancelled/i);
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: 'alice@test.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/password/i), {
+      target: { value: 'wrong-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/invalid email or password/i);
+    expect(window.location.href).toBe('');
   });
 
-  it('shows callout with "Something went wrong" for ?error=csrf_mismatch', () => {
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'csrf_mismatch' : null
-    );
-
-    render(<LoginPage />);
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/something went wrong/i);
-  });
-
-  it('shows callout with "Invalid request" for ?error=state_mismatch', () => {
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'state_mismatch' : null
-    );
-
-    render(<LoginPage />);
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/invalid request/i);
-  });
-
-  it('shows callout with "Authentication failed" for ?error=auth_failed', () => {
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'auth_failed' : null
-    );
-
-    render(<LoginPage />);
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/authentication failed/i);
-  });
-
-  it('shows callout with "Account conflict" for ?error=account_conflict', () => {
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'account_conflict' : null
-    );
-
-    render(<LoginPage />);
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/account conflict/i);
-  });
-
-  // --- Error callout: unknown code (Risk 1 — fallback behaviour) ---
-
-  it('shows callout with fallback message for an unknown error code', () => {
-    // Risk 1 decision: unknown codes now show the fallback, not "nothing"
-    mockGet.mockImplementation((key: string) =>
-      key === 'error' ? 'totally_unknown_error_xyz' : null
-    );
-
-    render(<LoginPage />);
-
-    const alert = screen.getByRole('alert');
-    expect(alert).toBeInTheDocument();
-    expect(alert.textContent).toMatch(/sign-in failed/i);
-  });
-
-  // --- Gradient accent bar inside card (Risk 2) ---
+  // --- Gradient accent bar inside card ---
 
   it('renders a gradient accent bar as the first child inside the card', () => {
     const { container } = render(<LoginPage />);
 
-    // The spec requires div.h-0.5.w-full inside the card wrapper
     const accentBar = container.querySelector('.h-0\\.5.w-full');
     expect(accentBar).toBeInTheDocument();
   });

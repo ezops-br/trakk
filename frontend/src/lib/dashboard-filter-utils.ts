@@ -84,3 +84,57 @@ export function sortProjects(
   });
   return dir === 'DESC' ? sorted.reverse() : sorted;
 }
+
+// ─── Due-date pill filter ─────────────────────────────────────────────────────
+
+export type DashboardDueFilter = 'all' | 'overdue' | 'today' | 'this_week';
+
+/**
+ * `matchesDueFilter` is a pure helper consumed by the dashboard My Tickets
+ * pill row.  It uses UTC midnight day boundaries so the answer is
+ * deterministic regardless of the local timezone, and because the wire
+ * format of `dueDate` is already a UTC-midnight ISO string (see
+ * `<DueDateBadge>` / Prisma `dueDate DateTime?`).
+ *
+ * Week starts on Monday (ISO 8601). `this_week` covers
+ * `[now, next Monday 00:00 UTC)`.
+ * `null` dueDate tickets only pass under the `'all'` filter.
+ */
+export function matchesDueFilter(
+  ticket: { dueDate: string | null },
+  filter: DashboardDueFilter,
+  now: Date = new Date(),
+): boolean {
+  if (filter === 'all') return true;
+  if (!ticket.dueDate) return false;
+
+  const todayUtcMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const todayMs = new Date(todayUtcMidnight).getTime();
+
+  if (filter === 'overdue') {
+    // Strictly before today's UTC midnight.
+    const dueMs = Date.parse(ticket.dueDate);
+    return dueMs < todayMs;
+  }
+
+  if (filter === 'today') {
+    // `[today midnight UTC, tomorrow midnight UTC)` — boundary-inclusive
+    // on the lower edge because the wire format is itself a midnight ISO.
+    const dueMs = Date.parse(ticket.dueDate);
+    return dueMs >= todayMs && dueMs < todayMs + 24 * 60 * 60 * 1000;
+  }
+
+  // 'this_week' — `[now, next Monday 00:00 UTC)`.
+  // JavaScript getUTCDay: 0 = Sun, 1 = Mon, ... 6 = Sat.
+  // Days until next Monday: 7 if Mon, (8 - day) % 7 (with 0 -> 7) otherwise.
+  const nowMs = now.getTime();
+  const day = now.getUTCDay();
+  const daysUntilNextMonday = day === 1 ? 7 : (8 - day) % 7 || 7;
+  const endOfWeekMs = todayMs + daysUntilNextMonday * 24 * 60 * 60 * 1000;
+  const dueMs = Date.parse(ticket.dueDate);
+  return dueMs >= nowMs && dueMs < endOfWeekMs;
+}

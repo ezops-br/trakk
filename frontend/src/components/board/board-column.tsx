@@ -9,6 +9,7 @@ import {
 import { Plus } from 'lucide-react';
 import type { StatusColumn, TicketWithRelations } from '@/lib/types';
 import { TicketCard } from './ticket-card';
+import { useSelectionContext } from '@/contexts/selection-context';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +33,7 @@ interface BoardColumnProps {
   onTicketClick: (ticketNumber: number) => void;
   totalCount: number;
   hasActiveFilters: boolean;
+  hideDragHandle?: boolean;
 }
 
 export function BoardColumn({
@@ -43,9 +45,17 @@ export function BoardColumn({
   onTicketClick,
   totalCount,
   hasActiveFilters,
+  hideDragHandle = false,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const canEdit = userRole !== 'VIEWER';
+  // Read the selection context at the column level so descendants (ticket
+  // cards) can rely on the same provider without re-fetching. Also passed
+  // down as a data attribute to make future styling hooks trivial.
+  const selection = useSelectionContext();
+  const selectedInThisColumn = tickets.filter((t) =>
+    selection.selectedNumbers.has(t.number),
+  ).length;
 
   return (
     <div
@@ -54,7 +64,10 @@ export function BoardColumn({
       className="flex w-[300px] shrink-0 flex-col rounded-panel bg-trakk-bg p-3"
     >
       {/* Header */}
-      <div className="mb-3 flex items-center gap-2 px-1">
+      <div
+        className="mb-3 flex items-center gap-2 px-1"
+        data-selected-count={selectedInThisColumn}
+      >
         <span className={cn('h-2 w-2 rounded-full', dotColor(column.name))} />
         <h3 className="font-display font-bold text-[23px] -tracking-wide text-trakk-text">
           {column.name}
@@ -94,6 +107,8 @@ export function BoardColumn({
                 ticket={ticket}
                 projectKey={projectKey}
                 onClick={() => onTicketClick(ticket.number)}
+                hideDragHandle={hideDragHandle}
+                userRole={userRole}
               />
             ))}
             {tickets.length === 0 && (

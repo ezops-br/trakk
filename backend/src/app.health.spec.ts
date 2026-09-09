@@ -2,17 +2,6 @@
 // TDD Red Phase — health check DB probe does not exist yet.
 // Tests for GET /api/v1/health with Prisma $queryRaw probe.
 
-// Mock pg-boss (ESM-only) before any module that transitively imports it.
-// meeting.service.ts → job-queue.ts → pg-boss would fail Jest's CJS transform.
-jest.mock('./lib/job-queue', () => ({
-  boss: {
-    send: jest.fn().mockResolvedValue(null),
-    cancel: jest.fn().mockResolvedValue(undefined),
-    work: jest.fn().mockResolvedValue(undefined),
-  },
-  startJobQueue: jest.fn().mockResolvedValue(undefined),
-}));
-
 // Mock prisma before importing app so the module picks up the mock
 jest.mock('./lib/prisma', () => {
   const db = {

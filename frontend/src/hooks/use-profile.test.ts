@@ -46,8 +46,6 @@ const MOCK_PROFILE = {
   displayName: 'Alice Smith',
   avatarUrl: 'https://example.com/avatar.jpg',
   themePreference: 'light',
-  googleConnected: true,
-  googleEmail: 'alice@example.com',
 };
 
 describe('useProfile', () => {

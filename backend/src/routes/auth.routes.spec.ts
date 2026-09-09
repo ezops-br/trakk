@@ -6,22 +6,16 @@ import { AppError } from '../lib/app-error';
 
 // Mock all service dependencies before importing the router
 jest.mock('../services/auth.service');
-jest.mock('../services/google-oauth.service');
 jest.mock('../utils/jwt');
 
 import { authRouter } from './auth.routes';
 import * as authService from '../services/auth.service';
-import * as googleOAuthService from '../services/google-oauth.service';
 import * as jwtUtils from '../utils/jwt';
 
-const mockUpsertUser = authService.upsertUser as jest.MockedFunction<typeof authService.upsertUser>;
+const mockVerifyCredentials = authService.verifyCredentials as jest.MockedFunction<typeof authService.verifyCredentials>;
 const mockFindUserById = authService.findUserById as jest.MockedFunction<typeof authService.findUserById>;
 const mockUpdateMe = authService.updateMe as jest.MockedFunction<typeof authService.updateMe>;
 const mockDisconnectUser = authService.disconnectUser as jest.MockedFunction<typeof authService.disconnectUser>;
-const mockGenerateAuthUrl = googleOAuthService.generateAuthUrl as jest.MockedFunction<typeof googleOAuthService.generateAuthUrl>;
-const mockExchangeCodeForTokens = googleOAuthService.exchangeCodeForTokens as jest.MockedFunction<typeof googleOAuthService.exchangeCodeForTokens>;
-const mockDecodeIdToken = googleOAuthService.decodeIdToken as jest.MockedFunction<typeof googleOAuthService.decodeIdToken>;
-const mockVerifyState = googleOAuthService.verifyState as jest.MockedFunction<typeof googleOAuthService.verifyState>;
 const mockSignAccessToken = jwtUtils.signAccessToken as jest.MockedFunction<typeof jwtUtils.signAccessToken>;
 const mockVerifyToken = jwtUtils.verifyToken as jest.MockedFunction<typeof jwtUtils.verifyToken>;
 
@@ -41,9 +35,6 @@ const FAKE_USER = {
   avatarUrl: 'https://example.com/avatar.jpg',
   themePreference: 'light',
   avatarStoragePath: null,
-  googleAvatarUrl: null,
-  googleConnected: true,
-  googleEmail: 'alice@example.com',
 };
 
 const FAKE_TOKEN_PAYLOAD = {
@@ -52,164 +43,87 @@ const FAKE_TOKEN_PAYLOAD = {
 };
 
 const VALID_SESSION = 'valid.session.token';
-const OAUTH_STATE = 'a'.repeat(64);
-const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth?state=' + OAUTH_STATE;
 
-describe('GET /api/v1/auth/google', () => {
-  const app = buildApp();
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockGenerateAuthUrl.mockReturnValue({ url: GOOGLE_AUTH_URL, state: OAUTH_STATE });
-  });
-
-  it('redirects 302 to a Google OAuth URL', async () => {
-    // Act
-    const res = await request(app).get('/api/v1/auth/google');
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('accounts.google.com');
-  });
-
-  it('sets the oauth_state cookie in the response', async () => {
-    // Act
-    const res = await request(app).get('/api/v1/auth/google');
-
-    // Assert
-    const setCookie = res.headers['set-cookie'] as string[] | string;
-    const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
-    expect(cookies.some((c: string) => c.startsWith('oauth_state='))).toBe(true);
-  });
-});
-
-describe('GET /api/v1/auth/google/callback — error cases', () => {
+describe('POST /api/v1/auth/login', () => {
   const app = buildApp();
 
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('redirects to /login?error=access_denied when query.error is present', async () => {
-    // Act
-    const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .query({ error: 'access_denied' });
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('/login');
-    expect(res.headers.location).toContain('error=access_denied');
-  });
-
-  it('redirects to /login?error=state_mismatch when oauth_state cookie is absent', async () => {
-    // Act
-    const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .query({ code: 'auth-code', state: OAUTH_STATE });
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=state_mismatch');
-  });
-
-  it('redirects to /login?error=state_mismatch when state values do not match', async () => {
+  it('returns 200, the user JSON body, and sets the trakk_session cookie on valid credentials', async () => {
     // Arrange
-    mockVerifyState.mockReturnValue(false);
-
-    // Act
-    const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .set('Cookie', `oauth_state=${OAUTH_STATE}`)
-      .query({ code: 'auth-code', state: 'wrong-state' });
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=state_mismatch');
-  });
-
-  it('redirects to /login?error=auth_failed when exchangeCodeForTokens throws', async () => {
-    // Arrange
-    mockVerifyState.mockReturnValue(true);
-    mockExchangeCodeForTokens.mockRejectedValue(new AppError(500, 'Internal server error'));
-
-    // Act
-    const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .set('Cookie', `oauth_state=${OAUTH_STATE}`)
-      .query({ code: 'auth-code', state: OAUTH_STATE });
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=auth_failed');
-  });
-
-  it('redirects to /login?error=account_conflict when upsertUser throws a 409 conflict', async () => {
-    // Arrange
-    mockVerifyState.mockReturnValue(true);
-    const fakeTokens = {
-      access_token: 'acc',
-      id_token: 'idt',
-      expiry_date: 9999,
-    };
-    mockExchangeCodeForTokens.mockResolvedValue(fakeTokens);
-    mockDecodeIdToken.mockReturnValue({
-      sub: 'google-sub',
-      email: 'alice@example.com',
-      name: 'Alice',
-      picture: null,
-    });
-    mockUpsertUser.mockRejectedValue(new AppError(409, 'Email already in use'));
-
-    // Act
-    const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .set('Cookie', `oauth_state=${OAUTH_STATE}`)
-      .query({ code: 'auth-code', state: OAUTH_STATE });
-
-    // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('error=account_conflict');
-  });
-});
-
-describe('GET /api/v1/auth/google/callback — success', () => {
-  const app = buildApp();
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('sets the trakk_session cookie and redirects to /callback on a successful flow', async () => {
-    // Arrange
-    mockVerifyState.mockReturnValue(true);
-    const fakeTokens = {
-      access_token: 'acc',
-      id_token: 'idt',
-      expiry_date: 9999,
-    };
-    mockExchangeCodeForTokens.mockResolvedValue(fakeTokens);
-    mockDecodeIdToken.mockReturnValue({
-      sub: 'google-sub',
-      email: 'alice@example.com',
-      name: 'Alice',
-      picture: 'https://example.com/pic.jpg',
-    });
-    mockUpsertUser.mockResolvedValue(FAKE_USER as Parameters<typeof mockUpsertUser.mockResolvedValue>[0]);
+    mockVerifyCredentials.mockResolvedValue(FAKE_USER);
     mockSignAccessToken.mockReturnValue(VALID_SESSION);
 
     // Act
     const res = await request(app)
-      .get('/api/v1/auth/google/callback')
-      .set('Cookie', `oauth_state=${OAUTH_STATE}`)
-      .query({ code: 'auth-code', state: OAUTH_STATE });
+      .post('/api/v1/auth/login')
+      .send({ email: 'alice@example.com', password: 'correct-password' });
 
     // Assert
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('/callback');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: FAKE_USER.id,
+      email: FAKE_USER.email,
+      displayName: FAKE_USER.displayName,
+      avatarUrl: FAKE_USER.avatarUrl,
+      themePreference: FAKE_USER.themePreference,
+    });
+    expect(mockVerifyCredentials).toHaveBeenCalledWith('alice@example.com', 'correct-password');
     const setCookie = res.headers['set-cookie'] as string[] | string;
     const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
     expect(cookies.some((c: string) => c.startsWith('trakk_session='))).toBe(true);
+  });
+
+  it('returns 401 with the error body when credentials are invalid', async () => {
+    // Arrange
+    mockVerifyCredentials.mockRejectedValue(new AppError(401, 'Invalid email or password'));
+
+    // Act
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'alice@example.com', password: 'wrong-password' });
+
+    // Assert
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ error: 'Invalid email or password' });
+    const setCookie = res.headers['set-cookie'] as string[] | string;
+    const cookies = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
+    expect(cookies.some((c: string) => c.startsWith('trakk_session='))).toBe(false);
+  });
+
+  it('returns 400 when email is missing', async () => {
+    // Act
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ password: 'some-password' });
+
+    // Assert
+    expect(res.status).toBe(400);
+    expect(mockVerifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when email is not a valid email format', async () => {
+    // Act
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'not-an-email', password: 'some-password' });
+
+    // Assert
+    expect(res.status).toBe(400);
+    expect(mockVerifyCredentials).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when password is missing', async () => {
+    // Act
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'alice@example.com' });
+
+    // Assert
+    expect(res.status).toBe(400);
+    expect(mockVerifyCredentials).not.toHaveBeenCalled();
   });
 });
 

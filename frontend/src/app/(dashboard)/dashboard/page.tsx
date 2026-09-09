@@ -4,11 +4,9 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useDashboardEvents } from '@/hooks/use-dashboard-events';
-import { CalendarSidebar } from '@/components/calendar/CalendarSidebar';
 import { DashboardMyTickets } from '@/components/dashboard/DashboardMyTickets';
 import { DashboardRecentActivity } from '@/components/dashboard/DashboardRecentActivity';
 import { DashboardProjects } from '@/components/dashboard/DashboardProjects';
-import { DashboardUpcomingMeetings } from '@/components/dashboard/DashboardUpcomingMeetings';
 import { TicketDetailSheet } from '@/components/tickets/ticket-detail-sheet';
 import type { DashboardFilters, Role } from '@/lib/types';
 
@@ -19,12 +17,10 @@ function DashboardContent() {
     tickets,
     activities,
     projects,
-    meetings,
     loading,
     error,
     setTickets,
     setActivities,
-    setMeetings,
     setProjects,
     refetch,
   } = useDashboard();
@@ -78,14 +74,6 @@ function DashboardContent() {
       setActivities((prev) =>
         prev.some((x) => x.id === a.id) ? prev : [a, ...prev].slice(0, 20),
       ),
-    // SSE meeting payloads don't include ticket.project nesting — refetch on create,
-    // merge to preserve ticket on update.
-    onMeetingCreated: () => refetch(),
-    onMeetingUpdated: (m) =>
-      setMeetings((prev) =>
-        prev.map((x) => (x.id === m.id ? { ...m, ticket: x.ticket } : x)),
-      ),
-    onMeetingDeleted: (id) => setMeetings((prev) => prev.filter((m) => m.id !== id)),
     onProjectArchived: (id) => setProjects((prev) => prev.filter((p) => p.id !== id)),
     onProjectDeleted: (id) => setProjects((prev) => prev.filter((p) => p.id !== id)),
   });
@@ -100,17 +88,14 @@ function DashboardContent() {
   // Error state: API fetch failed
   if (!loading && error) {
     return (
-      <div className="flex h-[calc(100%+3rem)] -m-6">
-        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-4">
-          <p className="text-trakk-text font-body">Failed to load dashboard.</p>
-          <button
-            onClick={refetch}
-            className="text-trakk-teal underline text-sm"
-          >
-            Retry
-          </button>
-        </div>
-        <CalendarSidebar />
+      <div className="flex h-[calc(100%+3rem)] -m-6 flex-col items-center justify-center p-6 gap-4">
+        <p className="text-trakk-text font-body">Failed to load dashboard.</p>
+        <button
+          onClick={refetch}
+          className="text-trakk-teal underline text-sm"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -118,22 +103,19 @@ function DashboardContent() {
   // Empty state: no projects yet
   if (!loading && !error && projects.length === 0) {
     return (
-      <div className="flex h-[calc(100%+3rem)] -m-6">
-        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-4">
-          <h1 className="text-2xl font-display font-bold text-trakk-text">
-            Welcome to Trakk
-          </h1>
-          <p className="text-trakk-text-secondary font-body">
-            Create your first project to get started.
-          </p>
-          <a
-            href="/projects"
-            className="text-trakk-teal underline text-sm font-body hover:text-trakk-teal/80 transition-colors"
-          >
-            Create a project
-          </a>
-        </div>
-        <CalendarSidebar />
+      <div className="flex h-[calc(100%+3rem)] -m-6 flex-col items-center justify-center p-6 gap-4">
+        <h1 className="text-2xl font-display font-bold text-trakk-text">
+          Welcome to Trakk
+        </h1>
+        <p className="text-trakk-text-secondary font-body">
+          Create your first project to get started.
+        </p>
+        <a
+          href="/projects"
+          className="text-trakk-teal underline text-sm font-body hover:text-trakk-teal/80 transition-colors"
+        >
+          Create a project
+        </a>
       </div>
     );
   }
@@ -164,22 +146,14 @@ function DashboardContent() {
               onNavigate={(id) => router.push(`/projects/${id}`)}
             />
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <DashboardRecentActivity
-              activities={activities}
-              loading={loading}
-              filters={filters}
-              onNavigate={openTicketSheet}
-            />
-            <DashboardUpcomingMeetings
-              meetings={meetings}
-              loading={loading}
-              onNavigate={openTicketSheet}
-            />
-          </div>
+          <DashboardRecentActivity
+            activities={activities}
+            loading={loading}
+            filters={filters}
+            onNavigate={openTicketSheet}
+          />
         </div>
       </div>
-      <CalendarSidebar />
       {openTicket && (
         <TicketDetailSheet
           projectId={openTicket.projectId}

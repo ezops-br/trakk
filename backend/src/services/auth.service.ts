@@ -1,96 +1,40 @@
-import { Prisma } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../lib/prisma';
-import { encrypt, decrypt } from '../utils/crypto';
-import { AppError } from '../lib/app-error';
-import { revokeToken } from './google-oauth.service';
+import { AppError, unauthorized } from '../lib/app-error';
 import { avatarStorage } from '../lib/avatar-storage';
+import { comparePassword } from '../utils/password';
 
 const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
-export async function upsertUser(
-  googleProfile: { sub: string; email: string; name: string; picture?: string | null },
-  tokens: { access_token: string; refresh_token?: string },
-): Promise<{ id: string; email: string; displayName: string; avatarUrl: string | null; themePreference: string }> {
-  const { sub, email, name, picture } = googleProfile;
-
-  // Check if an OAuthAccount already exists for this Google sub
-  const existingOAuthAccount = await prisma.oAuthAccount.findFirst({
-    where: { provider: 'google', providerId: sub },
-    include: { user: true },
-  });
-
-  if (existingOAuthAccount) {
-    // Returning user — update profile fields
-    // Never overwrite a manually-uploaded avatar; only update avatarUrl from Google
-    // when the user still has the Google-sourced one (no custom upload on record).
-    const hasCustomAvatar = !!existingOAuthAccount.user.avatarStoragePath;
-    const updatedUser = await prisma.user.update({
-      where: { id: existingOAuthAccount.userId },
-      data: {
-        email,
-        displayName: name,
-        googleAvatarUrl: picture ?? null,
-        ...(!hasCustomAvatar ? { avatarUrl: picture ?? null } : {}),
-      },
-      select: { id: true, email: true, displayName: true, avatarUrl: true, themePreference: true },
-    });
-
-    // Update OAuthAccount tokens
-    await prisma.oAuthAccount.update({
-      where: { id: existingOAuthAccount.id },
-      data: {
-        providerId: sub,
-        accessTokenEnc: encrypt(tokens.access_token),
-        ...(tokens.refresh_token !== undefined
-          ? { refreshTokenEnc: encrypt(tokens.refresh_token) }
-          : {}),
-      },
-    });
-
-    return updatedUser;
-  }
-
-  // New user — check if email is already taken by a different account
-  const emailConflict = await prisma.user.findFirst({
+export async function verifyCredentials(
+  email: string,
+  password: string,
+): Promise<{
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  themePreference: string;
+}> {
+  const user = await prisma.user.findUnique({
     where: { email },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      avatarUrl: true,
+      themePreference: true,
+      passwordHash: true,
+    },
   });
 
-  if (emailConflict) {
-    throw new AppError(409, 'This email is already registered with a different Google account');
+  if (!user || !(await comparePassword(password, user.passwordHash))) {
+    throw unauthorized('Invalid email or password');
   }
 
-  // Create new user with nested OAuthAccount
-  try {
-    const createdUser = await prisma.user.create({
-      data: {
-        email,
-        googleId: sub,
-        displayName: name,
-        avatarUrl: picture ?? null,
-        googleAvatarUrl: picture ?? null,
-        oauthAccounts: {
-          create: {
-            provider: 'google',
-            providerId: sub,
-            accessTokenEnc: encrypt(tokens.access_token),
-            refreshTokenEnc: tokens.refresh_token !== undefined
-              ? encrypt(tokens.refresh_token)
-              : null,
-          },
-        },
-      },
-      select: { id: true, email: true, displayName: true, avatarUrl: true, themePreference: true },
-    });
-
-    return createdUser;
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new AppError(409, 'This email is already registered with a different Google account');
-    }
-    throw err;
-  }
+  const { passwordHash: _passwordHash, ...safeUser } = user;
+  return safeUser;
 }
 
 export async function findUserById(userId: string): Promise<{
@@ -100,9 +44,6 @@ export async function findUserById(userId: string): Promise<{
   avatarUrl: string | null;
   themePreference: string;
   avatarStoragePath?: string | null;
-  googleAvatarUrl?: string | null;
-  googleConnected: boolean;
-  googleEmail: string | null;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -113,23 +54,13 @@ export async function findUserById(userId: string): Promise<{
       avatarUrl: true,
       themePreference: true,
       avatarStoragePath: true,
-      googleAvatarUrl: true,
     },
   });
   if (!user) {
     throw new AppError(404, 'User not found');
   }
 
-  const oauthAccount = await prisma.oAuthAccount.findFirst({
-    where: { userId, provider: 'google' },
-    select: { id: true, providerId: true },
-  });
-
-  return {
-    ...user,
-    googleConnected: oauthAccount !== null,
-    googleEmail: oauthAccount ? user.email : null,
-  };
+  return user;
 }
 
 export async function updateMe(
@@ -144,11 +75,6 @@ export async function updateMe(
 }
 
 export async function disconnectUser(userId: string): Promise<void> {
-  // Fetch OAuthAccount before deletion for token revocation
-  const oauthAccount = await prisma.oAuthAccount.findFirst({
-    where: { userId, provider: 'google' },
-  });
-
   // Nullify assigneeId on all tickets assigned to this user
   await prisma.ticket.updateMany({
     where: { assigneeId: userId },
@@ -198,17 +124,8 @@ export async function disconnectUser(userId: string): Promise<void> {
   // Remove all remaining memberships for this user
   await prisma.projectMember.deleteMany({ where: { userId } });
 
-  // Delete user (OAuthAccount cascades)
+  // Delete user
   await prisma.user.delete({ where: { id: userId } });
-
-  // Best-effort token revocation
-  if (oauthAccount?.refreshTokenEnc) {
-    try {
-      await revokeToken(decrypt(oauthAccount.refreshTokenEnc));
-    } catch {
-      // swallow errors silently
-    }
-  }
 }
 
 export async function uploadAvatar(
@@ -270,11 +187,10 @@ export async function deleteAvatar(userId: string): Promise<{
   avatarUrl: string | null;
   themePreference: string;
   avatarStoragePath: string | null;
-  googleAvatarUrl: string | null;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { avatarStoragePath: true, googleAvatarUrl: true },
+    select: { avatarStoragePath: true },
   });
 
   if (!user?.avatarStoragePath) {
@@ -288,12 +204,12 @@ export async function deleteAvatar(userId: string): Promise<{
     console.warn('[deleteAvatar] Failed to delete avatar file:', err);
   }
 
-  // Revert avatarUrl to googleAvatarUrl or null
+  // Revert avatarUrl to null (no custom avatar)
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: {
       avatarStoragePath: null,
-      avatarUrl: user.googleAvatarUrl ?? null,
+      avatarUrl: null,
     },
     select: {
       id: true,
@@ -302,30 +218,8 @@ export async function deleteAvatar(userId: string): Promise<{
       avatarUrl: true,
       themePreference: true,
       avatarStoragePath: true,
-      googleAvatarUrl: true,
     },
   });
 
   return updatedUser;
-}
-
-export async function softDisconnectGoogle(userId: string): Promise<void> {
-  const oauthAccount = await prisma.oAuthAccount.findFirst({
-    where: { userId, provider: 'google' },
-  });
-
-  if (!oauthAccount) {
-    throw new AppError(404, 'No Google account connected.');
-  }
-
-  // Best-effort token revocation
-  try {
-    if (oauthAccount.refreshTokenEnc) {
-      await revokeToken(decrypt(oauthAccount.refreshTokenEnc));
-    }
-  } catch {
-    // swallow revocation errors
-  }
-
-  await prisma.oAuthAccount.delete({ where: { id: oauthAccount.id } });
 }
