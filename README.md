@@ -59,7 +59,7 @@ Browser
         └── SSE for real-time board and dashboard updates
 ```
 
-No reverse proxy in front of the stack: the backend is published directly on host port 80 and the frontend on port 3000. This mirrors how the ephemeral sandbox exposes the same `docker-compose.yml` (see `sandbox-setup.sh`).
+No reverse proxy in front of the stack: the backend is published directly on host port 80 and the frontend on port 3000. The ephemeral sandbox exposes the same two ports (see `sandbox-setup.sh`).
 
 **Key design decisions**
 
@@ -123,12 +123,12 @@ First boot takes ~30 seconds while Docker builds images and runs migrations. Sub
 
 ## Running in a sandbox
 
-`sandbox-setup.sh` brings up the same `docker-compose.yml` inside an ephemeral Daytona sandbox instead of your own machine. Differences from `local-setup.sh`:
+`sandbox-setup.sh` brings up the same stack inside an ephemeral Daytona sandbox instead of your own machine — **without Docker**. The sandbox has no root, and `dockerd` only starts as root, so the script runs PostgreSQL, the backend and the frontend as plain processes of whoever calls it. Differences from `local-setup.sh`:
 
-- It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. `.env.sandbox` has non-secret config baked in plus placeholders (`__FRONTEND_URL__`, `__BACKEND_URL__`, `__COOKIE_DOMAIN__`, `__JWT_SECRET__`) that the script fills in at runtime, since every sandbox gets a different hostname/UUID.
-- It starts the Docker daemon itself (a fresh sandbox doesn't have it running).
-- It pre-pulls the base images with retries, since the sandbox's outbound network proxy intermittently 502s on Docker Hub.
-- URLs follow the pattern `https://<port>-<sandbox-uuid>.<domain>` (default domain `sandbox.acedev.ai`, override with the `SANDBOX_DOMAIN` env var).
+- Tools come from `devbox.json` (Node.js 22, PostgreSQL 16), installed with Devbox/Nix, which the sandbox image ships. `devbox.lock` pins the exact versions.
+- It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. `.env.sandbox` has non-secret config baked in plus placeholders (`__FRONTEND_URL__`, `__BACKEND_URL__`, `__COOKIE_DOMAIN__`, `__BACKEND_PORT__`, `__DB_PORT__`, `__JWT_SECRET__`) that the script fills in at runtime, since every sandbox gets a different hostname/UUID.
+- The database, logs and process ids live in a per-user directory (`~/.local/state/trakk-sandbox`), because the agent and each member are different Linux users sharing the checkout. The database survives re-runs; the seed runs only when the database is first created.
+- URLs follow the pattern `https://<port>-<sandbox-uuid>.<domain>` (default domain `sandbox.acedev.ai`). Override with `SANDBOX_DOMAIN` (may include a port) and `SANDBOX_SCHEME`; ports with `FRONTEND_PORT`, `BACKEND_PORT` and `DB_PORT` (defaults 3000, 80, 5432).
 
 Run it:
 
@@ -136,7 +136,7 @@ Run it:
 ./sandbox-setup.sh
 ```
 
-It prints the computed frontend/backend URLs when done. Log in with the same seeded account as local (`admin@trakk.local` / `admin123`).
+It prints the computed frontend/backend URLs and the log directory when done. Re-running it stops the previous run first. Log in with the same seeded account as local (`admin@trakk.local` / `admin123`).
 
 The rendered `.env` is gitignored and regenerated on every run — to change a non-secret config value, edit `.env.sandbox` (the committed template) instead, not `.env`.
 
@@ -266,7 +266,8 @@ trakk/
 │       └── lib/                   # API client, shared types, utilities
 ├── docker-compose.yml             # Full stack: db + migrate + backend + frontend
 ├── local-setup.sh                 # Recommended way to run the stack locally
-├── sandbox-setup.sh               # Runs the stack inside an ephemeral Daytona sandbox
+├── sandbox-setup.sh               # Runs the stack inside an ephemeral Daytona sandbox (no Docker)
+├── devbox.json / devbox.lock      # Tools for sandbox-setup.sh: Node.js 22, PostgreSQL 16
 ├── .env.example                   # Template for a local .env
 └── .env.sandbox                   # Committed template rendered into .env by sandbox-setup.sh
 ```

@@ -4,8 +4,8 @@
 # service replaces RDS.
 #
 # No nginx: backend is exposed directly on host port 80 and frontend on 3000,
-# mirroring how a Daytona sandbox exposes this stack (see sandbox-setup.sh)
-# with no reverse proxy in front of it.
+# the same ports a Daytona sandbox exposes (sandbox-setup.sh runs the stack
+# there without Docker, since the sandbox has no root for dockerd).
 #
 # Run (from the repo root):
 #   docker compose -f docker-compose.yml --env-file .env up -d --build

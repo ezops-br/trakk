@@ -38,3 +38,6 @@ npm-debug.log*
 
 # Local uploads (avatar storage)
 uploads/
+
+# Devbox (sandbox-setup.sh)
+.devbox/
