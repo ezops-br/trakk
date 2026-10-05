@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.4/.schema/devbox.schema.json",
+  "packages": {
+    "nodejs": "22",
+    "postgresql": {
+      "version": "16",
+      "disable_plugin": true
+    }
+  }
+}
