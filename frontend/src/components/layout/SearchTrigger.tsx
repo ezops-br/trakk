@@ -1,14 +1,17 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useCommandPalette } from '@/components/layout/CommandPaletteProvider';
 
 export function SearchTrigger() {
   const { open } = useCommandPalette();
-  const isMac =
-    typeof navigator !== 'undefined' &&
-    /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  // Read the platform after mount: the server has no navigator and renders
+  // "Ctrl+K", so deciding during render made Mac browsers fail hydration.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform));
+  }, []);
   const kbdLabel = isMac ? '⌘K' : 'Ctrl+K';
 
   return (
