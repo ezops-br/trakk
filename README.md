@@ -125,7 +125,7 @@ First boot takes ~30 seconds while Docker builds images and runs migrations. Sub
 
 `sandbox-setup.sh` brings up the same stack inside an ephemeral Daytona sandbox instead of your own machine — **without Docker**. The sandbox has no root, and `dockerd` only starts as root, so the script runs PostgreSQL, the backend and the frontend as plain processes of whoever calls it. Differences from `local-setup.sh`:
 
-- Tools come from `devbox.json` (Node.js 22, PostgreSQL 16), installed with Devbox/Nix, which the sandbox image ships. `devbox.lock` pins the exact versions.
+- Tools come from `devbox.json` (Node.js 22, PostgreSQL 16; `devbox.lock` pins the exact versions). When ACE has already prepared them, the script loads that environment from `.devbox/ace-shellenv.sh` and does not touch `.devbox`, which belongs to whoever prepared it; otherwise it runs `devbox install`.
 - It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. `.env.sandbox` has non-secret config baked in plus placeholders (`__FRONTEND_URL__`, `__BACKEND_URL__`, `__COOKIE_DOMAIN__`, `__BACKEND_PORT__`, `__DB_PORT__`, `__JWT_SECRET__`) that the script fills in at runtime, since every sandbox gets a different hostname/UUID.
 - The database, logs and process ids live in a per-user directory (`~/.local/state/trakk-sandbox`), because the agent and each member are different Linux users sharing the checkout. The database survives re-runs; the seed runs only when the database is first created.
 - URLs follow the pattern `https://<port>-<sandbox-uuid>.<domain>` (default domain `sandbox.acedev.ai`). Override with `SANDBOX_DOMAIN` (may include a port) and `SANDBOX_SCHEME`; ports with `FRONTEND_PORT`, `BACKEND_PORT` and `DB_PORT` (defaults 3000, 80, 5432).
