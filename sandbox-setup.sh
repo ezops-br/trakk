@@ -109,14 +109,24 @@ devbox_init() {
   fi
 
   cd "$REPO_ROOT"
-  log "⏳ devbox install (fast when the Nix store already has the packages)..."
-  devbox install
-  eval "$(devbox shellenv)"
+  # ACE prepares this repository's Devbox environment and publishes it for
+  # people as .devbox/ace-shellenv.sh. Use it as is: `devbox install` would
+  # rewrite .devbox, which belongs to whoever prepared it, and Devbox creates
+  # parts of it without group write, so another sandbox user cannot.
+  if [ -s "$REPO_ROOT/.devbox/ace-shellenv.sh" ]; then
+    log "✅ Using the environment ACE prepared (.devbox/ace-shellenv.sh)."
+    # shellcheck disable=SC1091
+    . "$REPO_ROOT/.devbox/ace-shellenv.sh"
+  else
+    log "⏳ devbox install (fast when the Nix store already has the packages)..."
+    devbox install
+    eval "$(devbox shellenv)"
+  fi
 
   local tool
   for tool in node npm initdb pg_ctl psql; do
     if ! command -v "$tool" >/dev/null 2>&1; then
-      log "❌ $tool not on PATH after devbox install."
+      log "❌ $tool not on PATH after loading the Devbox environment."
       exit 1
     fi
   done
