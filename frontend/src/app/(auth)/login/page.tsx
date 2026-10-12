@@ -10,8 +10,8 @@ import type { User } from '@/lib/types';
 const FALLBACK_ERROR = 'Sign-in failed. Please try again.';
 
 function LoginContent() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@trakk.local');
+  const [password, setPassword] = useState('admin123');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,6 +139,14 @@ function LoginContent() {
                 )}
               </Button>
             </form>
+
+            {/* Sign-up link */}
+            <p className="font-body font-normal text-[13px] text-trakk-text-secondary text-center mt-4">
+              Don&apos;t have an account?{' '}
+              <a href="/register" className="text-trakk-teal hover:underline">
+                Sign up
+              </a>
+            </p>
 
             {/* Error callout — only when error is non-null */}
             {error && (
