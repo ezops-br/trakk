@@ -1,11 +1,44 @@
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../lib/prisma';
-import { AppError, unauthorized } from '../lib/app-error';
+import { AppError, conflict, unauthorized } from '../lib/app-error';
 import { avatarStorage } from '../lib/avatar-storage';
-import { comparePassword } from '../utils/password';
+import { comparePassword, hashPassword } from '../utils/password';
 
 const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+
+export async function registerUser(
+  email: string,
+  password: string,
+  displayName: string,
+): Promise<{
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  themePreference: string;
+}> {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    throw conflict('An account with this email already exists.');
+  }
+
+  return prisma.user.create({
+    data: {
+      email,
+      passwordHash: await hashPassword(password),
+      displayName,
+      avatarUrl: `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(displayName)}`,
+    },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      avatarUrl: true,
+      themePreference: true,
+    },
+  });
+}
 
 export async function verifyCredentials(
   email: string,

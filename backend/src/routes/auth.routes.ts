@@ -6,6 +6,7 @@ import { requireAuth } from '../middleware/auth';
 import { authRateLimit } from '../middleware/rate-limit';
 import { validate } from '../middleware/validate';
 import {
+  registerUser,
   verifyCredentials,
   findUserById,
   updateMe,
@@ -36,6 +37,12 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  displayName: z.string().min(1).max(100),
+});
+
 export const authRouter = Router();
 
 // Shared trakk_session cookie attributes — see config.ts's SESSION_COOKIE_DOMAIN
@@ -49,7 +56,28 @@ const sessionCookieOptions = {
   ...(config.SESSION_COOKIE_DOMAIN ? { domain: config.SESSION_COOKIE_DOMAIN } : {}),
 };
 
-// No self-serve registration by design — users are provisioned via prisma/seed.ts only.
+// POST /register
+authRouter.post('/register', authRateLimit, validate(registerSchema), async (req, res, next) => {
+  try {
+    const { email, password, displayName } = req.body as {
+      email: string;
+      password: string;
+      displayName: string;
+    };
+    const user = await registerUser(email, password, displayName);
+    const jwt = signAccessToken({ userId: user.id, email: user.email });
+
+    res.cookie('trakk_session', jwt, {
+      ...sessionCookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(201).json(user);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /login
 authRouter.post('/login', authRateLimit, validate(loginSchema), async (req, res, next) => {
   try {
