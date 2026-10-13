@@ -186,7 +186,9 @@ render_env() {
     -e "s|__JWT_SECRET__|${jwt_secret}|g" \
     "$ENV_TEMPLATE" > "$ENV_FILE"
 
-  chmod 600 "$ENV_FILE"
+  # Group-readable, not 600: ACE saves the workspace as another user of the
+  # sandbox group, and a file only its owner can read is left out of the save.
+  chmod 640 "$ENV_FILE"
 
   log "✅ .env written ($(grep -vc '^#' "$ENV_FILE" | tr -d ' ') vars), JWT_SECRET freshly generated."
 }
