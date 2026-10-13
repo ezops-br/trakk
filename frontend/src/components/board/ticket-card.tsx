@@ -14,7 +14,16 @@ import {
 } from 'lucide-react';
 import type { TicketWithRelations, Priority } from '@/lib/types';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip';
+import {
+  cn,
+  formatRelativeTime,
+  formatAbsoluteDateTime,
+} from '@/lib/utils';
 
 const PRIORITY_BORDER: Record<Priority, string> = {
   URGENT: 'border-t-red-500',
@@ -127,12 +136,36 @@ export function TicketCard({
         </div>
       )}
 
-      {/* Footer: priority + assignee */}
-      <div className="mt-3 flex items-center justify-between">
+      {/* Footer: priority + relative-time tooltip + assignee */}
+      {/* Layout choice: priority (left) | relative-time (center) | assignee (right).
+          The relative-time label sits between the priority badge and the assignee
+          avatar in the existing flex row (justify-between keeps the priority-left
+          / assignee-right rhythm intact at the 300px column width, gap-2 ensures
+          the relative-time label has breathing room from both neighbors). The
+          trigger is a <span tabIndex={0}> (so it can be focused by keyboard
+          users), styled with the same micro-label register as the priority
+          badge and the drag handle. onClick stopPropagation matches the
+          existing drag handle's pattern so clicking the time label does not
+          open the ticket detail. */}
+      <div className="mt-3 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 font-mono text-[10px] tracking-[2px] uppercase text-trakk-text-secondary">
           {PRIORITY_ICON[ticket.priority]}
           {PRIORITY_LABEL[ticket.priority]}
         </span>
+        <Tooltip>
+          <TooltipTrigger>
+            <span
+              tabIndex={0}
+              onClick={(e) => e.stopPropagation()}
+              className="font-mono text-[10px] tracking-[1px] text-trakk-text-secondary"
+            >
+              {formatRelativeTime(ticket.updatedAt)}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {formatAbsoluteDateTime(ticket.updatedAt)}
+          </TooltipContent>
+        </Tooltip>
         {ticket.assignee ? (
           <Avatar className="h-6 w-6">
             {ticket.assignee.avatarUrl && (
