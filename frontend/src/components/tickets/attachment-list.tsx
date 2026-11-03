@@ -2,11 +2,6 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import type { TicketAttachment } from "@/lib/attachments";
 
-// Note: `TicketAttachment.url` is an absolute URL — the backend builds it from
-// the PUBLIC_BACKEND_URL env var (default http://localhost:4000) so the browser
-// resolves it against the backend origin, not the frontend's. Safe to use
-// directly in <img src={attachment.url}> without any host prefixing here.
-
 export interface AttachmentListProps {
   attachments: TicketAttachment[];
   canDelete: (attachment: TicketAttachment) => boolean;

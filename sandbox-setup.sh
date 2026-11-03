@@ -18,8 +18,8 @@ set -euo pipefail
 #      the non-secret trakk/prod/backend + trakk/prod/frontend values baked
 #      in, plus the fixed sandbox overrides (blank S3, local DATABASE_URL,
 #      DISABLE_APP_CORS, etc.) — a snapshot taken by hand, not fetched live.
-#   2. This script fills in the __FRONTEND_URL__/__BACKEND_URL__/
-#      __COOKIE_DOMAIN__ placeholders in .env.sandbox, computed from this
+#   2. This script fills in the __FRONTEND_URL__
+#      placeholder in .env.sandbox, computed from this
 #      sandbox's own id (compute_urls()) — the one part that can't be static,
 #      since every new sandbox gets a different UUID
 #      (<scheme>://<port>-<uuid>.<domain>). It also fills in the ports and
@@ -121,6 +121,10 @@ devbox_init() {
     log "⏳ devbox install (fast when the Nix store already has the packages)..."
     devbox install
     eval "$(devbox shellenv)"
+    # Devbox makes gen private; ACE's workspace saver is another project user.
+    # Touch only our own generated files, never symlinks into the Nix store.
+    find "$REPO_ROOT/.devbox" -user "$(id -u)" \( -type d -o -type f \) \
+      -exec chmod g+rwX {} +
   fi
 
   local tool
@@ -158,13 +162,9 @@ compute_urls() {
   fi
 
   FRONTEND_URL="${SANDBOX_SCHEME}://${FRONTEND_PORT}-${SANDBOX_UUID}.${SANDBOX_DOMAIN}"
-  BACKEND_URL="${SANDBOX_SCHEME}://${BACKEND_PORT}-${SANDBOX_UUID}.${SANDBOX_DOMAIN}"
-  # A cookie Domain never carries a port.
-  COOKIE_DOMAIN=".${SANDBOX_DOMAIN%%:*}"
 
   log "✅ Sandbox URLs computed:"
   log "   Frontend: $FRONTEND_URL"
-  log "   Backend:  $BACKEND_URL"
 }
 
 # ============================================================
@@ -179,8 +179,6 @@ render_env() {
   # sed delimiter is | (not /) since the replacement values are URLs.
   sed \
     -e "s|__FRONTEND_URL__|${FRONTEND_URL}|g" \
-    -e "s|__BACKEND_URL__|${BACKEND_URL}|g" \
-    -e "s|__COOKIE_DOMAIN__|${COOKIE_DOMAIN}|g" \
     -e "s|__BACKEND_PORT__|${BACKEND_PORT}|g" \
     -e "s|__DB_PORT__|${DB_PORT}|g" \
     -e "s|__JWT_SECRET__|${jwt_secret}|g" \
@@ -409,7 +407,8 @@ seed_database() {
 finish() {
   log_section "DONE"
   log "🌐 Frontend: $FRONTEND_URL"
-  log "🌐 Backend:  $BACKEND_URL"
+  log "🔐 Open the frontend using ACE's signed sandbox preview; bare proxy URLs remain protected."
+  log "   Browser API calls stay on that frontend origin; the backend is internal."
   log "📄 Logs:     $LOG_DIR"
 }
 

@@ -1,8 +1,5 @@
 // @ts-nocheck
-// TDD Red Phase — dashboard.routes.ts does not exist yet.
 // Tests for GET /api/v1/dashboard and GET /api/v1/dashboard/events.
-// All route tests will fail with 404 (route not registered) until implementation.
-// Service-layer tests will fail with "Cannot find module" until service is added.
 
 import http from 'http';
 import express from 'express';
@@ -11,14 +8,14 @@ import request from 'supertest';
 import { errorHandler } from '../middleware/error-handler';
 import { AppError } from '../lib/app-error';
 
-// Mock dashboard service before importing the router (virtual: router doesn't exist yet)
+// Mock the existing dashboard service before importing the router.
 jest.mock('../services/dashboard.service', () => ({
   getDashboardData: jest.fn().mockResolvedValue({
     tickets: [],
     activities: [],
     projects: [],
   }),
-}), { virtual: true });
+}));
 
 // Mock auth middleware
 jest.mock('../middleware/auth');

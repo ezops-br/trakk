@@ -19,7 +19,9 @@ router.get('/events', (req, res) => {
   const userId = req.user!.userId;
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  // Preserve immediate event delivery through the frontend preview proxy.
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
@@ -33,7 +35,7 @@ router.get('/events', (req, res) => {
     }
   }, 30000);
 
-  req.on('close', () => {
+  res.on('close', () => {
     clearInterval(keepAlive);
     unsubscribeFromDashboard(userId, res);
   });

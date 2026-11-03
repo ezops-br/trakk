@@ -29,7 +29,9 @@ eventsRouter.get(
       }
 
       res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
+      // Compression can buffer SSE frames until enough data accumulates.
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('X-Accel-Buffering', 'no');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
 
@@ -39,7 +41,7 @@ eventsRouter.get(
         res.write(': keepalive\n\n');
       }, KEEPALIVE_INTERVAL_MS);
 
-      req.on('close', () => {
+      res.on('close', () => {
         clearInterval(keepalive);
         unsubscribe(projectId, res);
       });
