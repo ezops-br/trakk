@@ -59,7 +59,13 @@ Browser
         └── SSE for real-time board and dashboard updates
 ```
 
-No reverse proxy in front of the stack: the backend is published directly on host port 80 and the frontend on port 3000. The ephemeral sandbox exposes the same two ports (see `sandbox-setup.sh`).
+The Docker stack publishes the backend on host port 80 and the frontend on
+port 3000. In an ephemeral ACE sandbox, open the frontend with the signed
+preview URL from ACE. Browser calls use `/api/v1` on that same origin; Next.js
+forwards them to `INTERNAL_API_URL` inside the sandbox. The browser never needs
+to open a separate backend preview. Sandbox sessions are host-only, so they
+are not sent to other sandboxes. Bare branded proxy URLs remain protected.
+See `docs/features/sandbox-preview/BEHAVIOR.md` and `sandbox-setup.sh`.
 
 **Key design decisions**
 
@@ -126,9 +132,10 @@ First boot takes ~30 seconds while Docker builds images and runs migrations. Sub
 `sandbox-setup.sh` brings up the same stack inside an ephemeral Daytona sandbox instead of your own machine — **without Docker**. The sandbox has no root, and `dockerd` only starts as root, so the script runs PostgreSQL, the backend and the frontend as plain processes of whoever calls it. Differences from `local-setup.sh`:
 
 - Tools come from `devbox.json` (Node.js 22, PostgreSQL 16; `devbox.lock` pins the exact versions). When ACE has already prepared them, the script loads that environment from `.devbox/ace-shellenv.sh` and does not touch `.devbox`, which belongs to whoever prepared it; otherwise it runs `devbox install`.
-- It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. `.env.sandbox` has non-secret config baked in plus placeholders (`__FRONTEND_URL__`, `__BACKEND_URL__`, `__COOKIE_DOMAIN__`, `__BACKEND_PORT__`, `__DB_PORT__`, `__JWT_SECRET__`) that the script fills in at runtime, since every sandbox gets a different hostname/UUID.
+- It reads `.env.sandbox` (committed to the repo) instead of a hand-written `.env`. The template has non-secret config plus `__FRONTEND_URL__`, `__BACKEND_PORT__`, `__DB_PORT__` and `__JWT_SECRET__` placeholders filled in at runtime.
 - The database, logs and process ids live in a per-user directory (`~/.local/state/trakk-sandbox`), because the agent and each member are different Linux users sharing the checkout. The database survives re-runs; the seed runs only when the database is first created.
-- URLs follow the pattern `https://<port>-<sandbox-uuid>.<domain>` (default domain `sandbox.acedev.ai`). Override with `SANDBOX_DOMAIN` (may include a port) and `SANDBOX_SCHEME`; ports with `FRONTEND_PORT`, `BACKEND_PORT` and `DB_PORT` (defaults 3000, 80, 5432).
+- Open the application with ACE's signed sandbox preview for frontend port 3000. Browser requests stay on that origin; Next forwards `/api/v1` to the internal backend, and the session cookie is host-only. Bare proxy URLs remain protected. Ports can be overridden with `FRONTEND_PORT`, `BACKEND_PORT` and `DB_PORT` (defaults 3000, 80, 5432).
+- The development server writes to `.next-dev`; production builds write to `.next`. This lets an agent run build checks without overwriting the member's active preview chunks. Both directories are generated and ignored by Git.
 
 Run it:
 
@@ -136,7 +143,7 @@ Run it:
 ./sandbox-setup.sh
 ```
 
-It prints the computed frontend/backend URLs and the log directory when done. Re-running it stops the previous run first. Log in with the same seeded account as local (`admin@trakk.local` / `admin123`).
+It prints the signed-preview instructions and log directory when done. Re-running it stops only that member's previous processes and preserves the sandbox database. Log in with the same seeded account as local (`admin@trakk.local` / `admin123`).
 
 The rendered `.env` is gitignored and regenerated on every run — to change a non-secret config value, edit `.env.sandbox` (the committed template) instead, not `.env`.
 
@@ -159,7 +166,7 @@ PORT=4000
 CORS_ORIGIN=http://localhost:3000
 NODE_ENV=development
 DISABLE_APP_CORS=      # sandbox-only, see config.ts comment
-SESSION_COOKIE_DOMAIN= # widen the session cookie's Domain attribute; sandbox-only
+SESSION_COOKIE_DOMAIN= # optional legacy parent-domain override; sandbox keeps it empty
 
 # Frontend
 NEXT_PUBLIC_API_URL=http://localhost   # bare origin, no /api/v1 suffix
